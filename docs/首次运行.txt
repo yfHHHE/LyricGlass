@@ -1,0 +1,27 @@
+LyricGlass v0.1.0 · 公开测试版
+
+系统要求：macOS 13 或更高版本，Apple Silicon 或 Intel Mac，Spotify 桌面客户端
+
+1. 把 LyricGlass.app 拖进 Applications（应用程序）
+2. 打开 LyricGlass.app；它会在菜单栏显示气泡图标，在屏幕底部显示透明双行歌词
+3. 首次使用时，允许 LyricGlass 读取 Spotify 的自动化权限
+4. 在 Spotify 桌面端播放歌曲，等待歌词匹配
+
+此版本使用本地 ad-hoc 签名，没有 Apple Developer ID 签名和公证
+如果 macOS 阻止打开，请先核实下载来自本项目 GitHub Release
+尝试打开 app 后，进入“系统设置 → 隐私与安全性”，找到 LyricGlass 的提示并选择“仍要打开”
+受组织管理的 Mac 可能不允许此操作，需要联系设备管理员
+Apple 官方说明：https://support.apple.com/102445
+
+如果 Spotify 自动化权限曾被拒绝：
+系统设置 → 隐私与安全性 → 自动化 → LyricGlass → Spotify
+打开后，再点菜单栏里的“重试 Spotify 连接”
+
+操作：拖动歌词移动位置；右键歌词或点击菜单栏气泡图标，调整字号、时间偏移和鼠标穿透
+没有歌词或服务正忙：可重试，也可为当前歌曲导入 UTF-8 的 .lrc 文件
+
+歌曲名称、歌手、专辑和时长会发往 lrclib.net，用于匹配歌词
+不上传 Spotify 账号信息、token、音频或本地 LRC 文件
+此版本的设置与歌词缓存仅保留在内存，退出后恢复默认
+
+项目与下载：https://github.com/yfHHHE/LyricGlass
