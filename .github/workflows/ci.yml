@@ -22,5 +22,6 @@ jobs:
         run: ./scripts/build-app.sh --universal
       - name: Verify both architectures and signature
         run: |
-          lipo -verify_arch arm64 x86_64 dist/LyricGlass.app/Contents/MacOS/LyricGlass
+          TASK_ARCHS="$(lipo -archs dist/LyricGlass.app/Contents/MacOS/LyricGlass)"
+          [[ "$TASK_ARCHS" == *arm64* && "$TASK_ARCHS" == *x86_64* ]]
           codesign --verify --deep --strict dist/LyricGlass.app
