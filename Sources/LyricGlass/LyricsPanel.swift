@@ -22,7 +22,8 @@ final class LyricsPanel: NSPanel {
     override var canBecomeMain: Bool { false }
 
     func centerAtBottom() {
-        let screen = screen ?? NSScreen.main ?? NSScreen.screens.first
+        // Use the primary display so a reopened overlay is easy to find on multi-monitor Macs.
+        let screen = NSScreen.screens.first ?? NSScreen.main
         guard let screen else { return }
         let visible = screen.visibleFrame
         let width = min(940, visible.width - 40)

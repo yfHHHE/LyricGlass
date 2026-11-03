@@ -60,6 +60,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         lyricsTask?.cancel()
     }
 
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        panel?.centerAtBottom()
+        panel?.orderFrontRegardless()
+        return true
+    }
+
     private func poll() {
         guard !demo, !polling else { return }
         polling = true
@@ -224,7 +230,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let lock = item("锁定位置 / 鼠标穿透", #selector(toggleLock))
         lock.state = panel.ignoresMouseEvents ? .on : .off
         menu.addItem(lock)
-        menu.addItem(item("恢复底部居中", #selector(recenter)))
+        menu.addItem(item("恢复主屏底部居中", #selector(recenter)))
         let font = NSMenuItem(title: "歌词字号", action: nil, keyEquivalent: "")
         let sizes = NSMenu()
         for size in [24, 30, 36, 42] {
