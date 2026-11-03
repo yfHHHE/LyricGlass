@@ -1,9 +1,20 @@
 import Foundation
 
 public enum LyricsSource: String, Codable, Sendable, CaseIterable {
-    case lrclib, netease, qq
-    public var label: String { switch self { case .lrclib: return "LRCLIB"; case .netease: return "网易"; case .qq: return "QQ Music" } }
-    public var website: URL { URL(string: self == .lrclib ? "https://lrclib.net" : self == .netease ? "https://music.163.com" : "https://y.qq.com")! }
+    case lrclib, netease, qq, kugou
+    public var label: String {
+        switch self { case .lrclib: return "LRCLIB"; case .netease: return "网易"; case .qq: return "QQ Music"; case .kugou: return "酷狗" }
+    }
+    public var website: URL {
+        let address: String
+        switch self {
+        case .lrclib: address = "https://lrclib.net"
+        case .netease: address = "https://music.163.com"
+        case .qq: address = "https://y.qq.com"
+        case .kugou: address = "https://www.kugou.com"
+        }
+        return URL(string: address)!
+    }
 }
 
 public struct Song: Codable, Equatable, Sendable {

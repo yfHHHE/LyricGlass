@@ -16,7 +16,7 @@ if CommandLine.arguments.contains("--check-lyrics") {
     }
     let selected = argument("--source")
     guard selected == nil || selected == "all" || LyricsSource(rawValue: selected!) != nil else {
-        fputs("--source must be all, lrclib, netease or qq\n", stderr); exit(2)
+        fputs("--source must be all, lrclib, netease, qq or kugou\n", stderr); exit(2)
     }
     Task {
         do {

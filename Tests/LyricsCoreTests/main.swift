@@ -82,6 +82,14 @@ final class TimelineTests {
         checkTrue(LyricsProvider.matches(record, song: song))
     }
 
+    func testAmazingShowAliasKeepsRecordingChecks() {
+        let song = Song(id: "amazing-show", title: "愛情的大壞蛋", artist: "Amazing Show", album: "美秀集團同名專輯", duration: 187)
+        checkTrue(LyricsProvider.matches(.init(trackName: "爱情的大坏蛋", artistName: "美秀集团", albumName: "美秀集团同名专辑", duration: 187), song: song))
+        checkFalse(LyricsProvider.matches(.init(trackName: "爱情的大坏蛋 (DJ Remix)", artistName: "美秀集团", duration: 187), song: song))
+        checkFalse(LyricsProvider.matches(.init(trackName: "爱情的大坏蛋", artistName: "美秀集团", duration: 99), song: song))
+        checkFalse(LyricsProvider.matches(.init(trackName: "爱情的大坏蛋", artistName: "Another Show", duration: 187), song: song))
+    }
+
     func testCollaboratorsAndVersionsStayDistinct() {
         let song = Song(id: "collab", title: "Afterglow (feat. Guest)", artist: "Lead, Guest", album: "Shared Album", duration: 200)
         checkTrue(LyricsProvider.matches(.init(trackName: "Afterglow", artistName: "Guest & Lead", albumName: "Shared Album", duration: 200), song: song))
@@ -146,6 +154,7 @@ let cases: [(String, () -> Void)] = [
     ("Recording identity, duration and Chinese matching", suite.testMatchingRejectsDifferentRecordingAndDuration),
     ("Playback-to-lyrics integration", suite.testPlaybackToLyricsIntegration),
     ("English artist alias matches Chinese catalog", suite.testEnglishArtistAliasMatchesChineseCatalog),
+    ("Amazing Show alias preserves recording checks", suite.testAmazingShowAliasKeepsRecordingChecks),
     ("Collaborators match without mixing recording versions", suite.testCollaboratorsAndVersionsStayDistinct),
     ("Provider aliases and usable timestamps", suite.testCatalogAliasesAndRealTimestamps),
     ("Bilingual display names require album evidence", suite.testBilingualDisplayNamesNeedAlbumEvidence),
@@ -161,6 +170,7 @@ let asyncCases: [(String, () async -> Void)] = [
     ("Plain lyrics do not block timed fallback", checkTimedFallback),
     ("Restarted app reads timed lyrics offline", checkCacheSurvivesRestartOffline),
     ("Service failures fall through to QQ with correct version", checkQQFallback),
+    ("Missing catalogs fall through to Kugou with valid LRC", checkKugouFallback),
     ("Long throttles skip the host without blocking other sources", checkLongThrottle),
     ("Cancellation stops fallback requests", checkCancellation),
     ("Corrupt cache recovers and clear preserves unrelated files", checkCorruptCache)

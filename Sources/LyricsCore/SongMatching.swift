@@ -7,7 +7,8 @@ enum ArtistNames {
         ["Crowd Lu", "卢广仲"], ["New Pants", "新裤子"],
         ["Eason Chan", "陈奕迅"], ["Jay Chou", "周杰伦"],
         ["Faye Wong", "王菲"], ["Sodagreen", "苏打绿"],
-        ["Accusefive", "告五人"], ["No Party For Cao Dong", "草东没有派对"]
+        ["Accusefive", "告五人"], ["No Party For Cao Dong", "草东没有派对"],
+        ["Amazing Show", "美秀集团"]
     ]
 
     static func canonical(_ name: String) -> String {

@@ -116,6 +116,58 @@ func checkQQFallback() async {
     } catch { failures += 1; print("FAIL QQ fallback: \(error)") }
 }
 
+actor KugouFixture {
+    var downloads: [String] = []
+    func send(_ request: URLRequest) -> (Data, HTTPURLResponse) {
+        let url = request.url!
+        var status = 200
+        let json: [String: Any]
+        if url.host == "lrclib.net" { status = 404; json = [:] }
+        else if url.path == "/api/search/pc" { json = ["code": 200, "result": ["songs": []]] }
+        else if url.path.contains("client_search_cp") { json = ["code": 0, "data": ["song": ["list": []]]] }
+        else if url.host == "lyrics.kugou.com", url.path == "/search" {
+            // This endpoint returns empty results for reordered or URL-style space encoding.
+            checkTrue(url.absoluteString.contains("?keyword="))
+            checkTrue(url.absoluteString.contains("+"))
+            checkFalse(url.absoluteString.contains("%20"))
+            checkTrue(url.absoluteString.contains("&duration=247000&client=pc&ver=1&man=yes"))
+            json = ["status": 200, "candidates": [
+                ["id": "remix", "song": "一夜一夜一夜 (DJ Remix)", "singer": "卢广仲", "duration": 247000, "accesskey": "fixture"],
+                ["id": "short", "song": "一夜一夜一夜", "singer": "卢广仲", "duration": 241000, "accesskey": "fixture"],
+                ["id": "cover", "song": "一夜一夜一夜", "singer": "Someone Else", "duration": 247000, "accesskey": "fixture"],
+                ["id": "right", "song": "一夜一夜一夜", "singer": "卢广仲", "duration": 247000, "accesskey": "fixture+token"]
+            ]]
+        } else if url.host == "lyrics.kugou.com", url.path == "/download" {
+            let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+            let id = items.first { $0.name == "id" }?.value ?? "wrong"
+            downloads.append(id)
+            checkEqual(items.first { $0.name == "fmt" }?.value, "lrc")
+            checkTrue(url.absoluteString.contains("&accesskey=fixture%2Btoken&fmt=lrc"))
+            json = ["status": 200, "content": Data("[00:05]\(id) one\n[00:10]example two".utf8).base64EncodedString()]
+        } else { json = [:] }
+        return (try! JSONSerialization.data(withJSONObject: json), HTTPURLResponse(url: url, statusCode: status, httpVersion: nil, headerFields: nil)!)
+    }
+}
+
+func checkKugouFallback() async {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let fixture = KugouFixture()
+    let provider = LyricsProvider(http: LyricsHTTPClient(sender: { await fixture.send($0) }, sleep: { _ in }), cacheDirectory: directory)
+    do {
+        let song = Song(id: "kugou-fallback", title: "一夜一夜一夜", artist: "Crowd Lu", album: "", duration: 247)
+        let record = try await provider.fetch(song: song)
+        checkEqual(record.sourceKind.rawValue, "kugou")
+        checkTrue(record.hasSyncedLyrics)
+        checkEqual(LyricsTimeline(lrc: record.syncedLyrics ?? "").pair(at: 6).current, "right one")
+        checkEqual(await fixture.downloads, ["right"])
+        let offline = LyricsHTTPClient(sender: { _ in throw URLError(.notConnectedToInternet) }, sleep: { _ in })
+        let restarted = try await LyricsProvider(http: offline, cacheDirectory: directory).fetch(song: song)
+        checkTrue(restarted.cached)
+        checkEqual(restarted.sourceKind.rawValue, "kugou")
+    } catch { failures += 1; print("FAIL Kugou fallback: \(error)") }
+}
+
 actor ThrottleFixture {
     var calls = 0
     var waits = 0

@@ -42,6 +42,7 @@ public actor LyricsProvider {
                     if !netEasePrepared { try await remote.prepareNetEase(); netEasePrepared = true }
                     records = try await remote.netease(song)
                 case .qq: records = try await remote.qq(song)
+                case .kugou: records = try await remote.kugou(song)
                 }
                 let valid = records.filter { Self.matches($0, song: song) }.sorted {
                     (SongMatcher.score($0, song: song) ?? 0) > (SongMatcher.score($1, song: song) ?? 0)

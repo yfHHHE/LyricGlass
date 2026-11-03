@@ -95,9 +95,54 @@ struct RemoteLyrics {
         return []
     }
 
+    func kugou(_ song: Song) async throws -> [LyricsRecord] {
+        let title = Self.simplified(SongMatcher.queryTitle(song.title))
+        for query in [title + " " + ArtistNames.queryName(song.artist), title] {
+            let reply: KugouSearch = try await json("https://lyrics.kugou.com/search",
+                [.init(name: "keyword", value: query),
+                 .init(name: "duration", value: String(format: "%.0f", locale: Locale(identifier: "en_US_POSIX"), song.duration * 1000)),
+                 .init(name: "client", value: "pc"), .init(name: "ver", value: "1"), .init(name: "man", value: "yes")],
+                formEncoded: true)
+            guard reply.status == 200 else { throw LyricsLookupError.unavailable("酷狗") }
+            let candidates = (reply.candidates ?? []).prefix(10).compactMap { track -> (KugouTrack, LyricsRecord)? in
+                let record = LyricsRecord(trackName: track.song, artistName: track.singer,
+                    duration: track.duration / 1000, source: .kugou)
+                return LyricsProvider.matches(record, song: song) ? (track, record) : nil
+            }.sorted { (SongMatcher.score($0.1, song: song) ?? 0) > (SongMatcher.score($1.1, song: song) ?? 0) }
+            var results: [LyricsRecord] = []
+            for (track, metadata) in candidates.prefix(2) {
+                try Task.checkCancellation()
+                // The search result supplies the resource key; no account credentials are used or saved.
+                let lyric: KugouLyrics = try await json("https://lyrics.kugou.com/download",
+                    [.init(name: "id", value: track.id), .init(name: "accesskey", value: track.accesskey),
+                     .init(name: "fmt", value: "lrc"), .init(name: "charset", value: "utf8"),
+                     .init(name: "client", value: "pc"), .init(name: "ver", value: "1")], formEncoded: true)
+                guard lyric.status == 200 else { throw LyricsLookupError.unavailable("酷狗") }
+                guard let content = lyric.content, let data = Data(base64Encoded: content),
+                      let lrc = String(data: data, encoding: .utf8), !lrc.isEmpty else { continue }
+                let record = Self.withLyrics(lrc, metadata: metadata)
+                results.append(record)
+                if record.hasSyncedLyrics { return results }
+            }
+            if !results.isEmpty { return results }
+        }
+        return []
+    }
+
     private func json<T: Decodable>(_ base: String, _ parameters: [String: String], post: Bool = false, referer: String? = nil) async throws -> T {
+        try await json(base, parameters.sorted { $0.key < $1.key }.map { .init(name: $0.key, value: $0.value) },
+                       post: post, referer: referer)
+    }
+
+    private func json<T: Decodable>(_ base: String, _ parameters: [URLQueryItem], formEncoded: Bool = false,
+                                     post: Bool = false, referer: String? = nil) async throws -> T {
         var url = URLComponents(string: base)!
-        url.queryItems = parameters.sorted { $0.key < $1.key }.map { .init(name: $0.key, value: $0.value) }
+        url.queryItems = parameters
+        if formEncoded {
+            // Preserve Kugou's catalog parameter order and form encoding for compatibility.
+            url.percentEncodedQuery = url.percentEncodedQuery?.replacingOccurrences(of: "+", with: "%2B")
+                .replacingOccurrences(of: "%20", with: "+")
+        }
         var request = URLRequest(url: url.url!)
         if post { request.httpMethod = "POST" }
         request.setValue("application/json", forHTTPHeaderField: "Accept")
@@ -149,3 +194,6 @@ private struct QQSearch: Decodable {
     struct Songs: Decodable { let list: [QQTrack]? }
 }
 private struct QQLyrics: Decodable { let code: Int; let lyric: String? }
+private struct KugouTrack: Decodable { let id: String; let song: String; let singer: String; let duration: Double; let accesskey: String }
+private struct KugouSearch: Decodable { let status: Int; let candidates: [KugouTrack]? }
+private struct KugouLyrics: Decodable { let status: Int; let content: String? }
