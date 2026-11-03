@@ -39,22 +39,24 @@ if CommandLine.arguments.contains("--check-lyrics") {
     }
     dispatchMain()
 } else if CommandLine.arguments.contains("--diagnose-spotify") || CommandLine.arguments.contains("--diagnose-player") {
-    let selected = CommandLine.arguments.contains("--diagnose-spotify") ? "spotify" : argument("--player") ?? "spotify"
-    guard let player = DesktopPlayer(rawValue: selected),
+    let selected = CommandLine.arguments.contains("--diagnose-spotify") ? "spotify" : argument("--player") ?? "auto"
+    guard let mode = PlaybackMode(rawValue: selected),
           let watch = Double(argument("--watch") ?? "0"), watch.isFinite, (0...120).contains(watch) else {
-        fputs("Use --player spotify|apple-music and --watch 0...120 seconds\n", stderr); exit(2)
+        fputs("Use --player auto|spotify|apple-music and --watch 0...120 seconds\n", stderr); exit(2)
     }
-    let reader = PlayerReader(player: player)
+    let monitor = PlaybackMonitor()
     let outputFlag = CommandLine.arguments.firstIndex(of: "--output")
     let output = outputFlag.flatMap { $0 + 1 < CommandLine.arguments.count ? CommandLine.arguments[$0 + 1] : nil }
     func diagnose() {
       let result: [String: Any]
+      let update = monitor.poll(mode: mode)
+      let selectedPlayer = update.player?.rawValue ?? mode.rawValue
       do {
-        let sample = try reader.read()
-        result = ["ok": true, "player": player.rawValue, "title": sample.song?.title ?? "", "artist": sample.song?.artist ?? "",
+        let sample = try update.result.get()
+        result = ["ok": true, "mode": mode.rawValue, "player": selectedPlayer, "title": sample.song?.title ?? "", "artist": sample.song?.artist ?? "",
                   "album": sample.song?.album ?? "", "duration": sample.song?.duration ?? 0,
                   "position": sample.position, "playing": sample.playing]
-      } catch { result = ["ok": false, "player": player.rawValue, "error": error.localizedDescription] }
+      } catch { result = ["ok": false, "mode": mode.rawValue, "player": selectedPlayer, "error": error.localizedDescription] }
       let data = try! JSONSerialization.data(withJSONObject: result, options: [.sortedKeys])
       if let output { try? data.write(to: URL(fileURLWithPath: output)) }
       print(String(data: data, encoding: .utf8)!)

@@ -7,13 +7,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var statusItem: NSStatusItem!
     private var panel: LyricsPanel!
     private var player = DesktopPlayer(rawValue: UserDefaults.standard.string(forKey: "playbackPlayer") ?? "") ?? .spotify
-    private var reader: PlayerReader!
+    private var mode = PlaybackMode(rawValue: UserDefaults.standard.string(forKey: "playbackMode") ?? "") ?? .automatic
+    private var detectedPlayer: DesktopPlayer?
+    private var monitor: PlaybackMonitor!
     private let lyricsProvider = LyricsProvider()
     private let readerQueue = DispatchQueue(label: "ai.yufan.lyricglass.playback", qos: .userInitiated)
     private var pollTimer: Timer?
     private var renderTimer: Timer?
     private var polling = false
-    private var permissionDenied = false
     private var modeGeneration = 0
     private var lookupGeneration = 0
     private var lyricsTask: Task<Void, Never>?
@@ -32,8 +33,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var offset = 0.0
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        reader = PlayerReader(player: player)
-        message = "正在连接 \(player.label)…"
+        if let selected = mode.selectedPlayer { player = selected }
+        monitor = PlaybackMonitor(preferredPlayer: player)
+        message = mode == .automatic ? "正在识别播放器…" : "正在连接 \(player.label)…"
         NSApp.setActivationPolicy(.accessory)
         panel = LyricsPanel()
         panel.orderFrontRegardless()
@@ -59,23 +61,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func poll() {
-        guard !demo, !polling, !permissionDenied else { return }
+        guard !demo, !polling else { return }
         polling = true
         let generation = modeGeneration
-        let reader = self.reader!
+        let monitor = self.monitor!
+        let mode = self.mode
         readerQueue.async { [weak self] in
             guard let self else { return }
-            let result = Result { try reader.read() }
+            let update = monitor.poll(mode: mode)
             DispatchQueue.main.async {
                 self.polling = false
                 guard !self.demo, self.modeGeneration == generation else { return }
-                switch result {
+                if let selected = update.player {
+                    if self.detectedPlayer != selected { UserDefaults.standard.set(selected.rawValue, forKey: "playbackPlayer") }
+                    if selected != self.player {
+                        self.clearSong()
+                        self.player = selected
+                        self.message = "正在连接 \(selected.label)…"
+                    }
+                }
+                self.detectedPlayer = update.player
+                switch update.result {
                 case .success(let sample): self.accept(sample)
                 case .failure(let error):
-                    if case PlayerReadError.changedTrack = error { return }
-                    if case PlayerReadError.denied = error { self.permissionDenied = true }
+                    if case PlayerReadError.changedTrack = error { self.render(); return }
                     self.clearSong()
-                    self.message = "等待 \(self.player.label)"
+                    self.message = self.detectedPlayer.map { "等待 \($0.label)" } ?? "等待播放器"
                     self.secondary = error.localizedDescription
                     self.render()
                 }
@@ -158,6 +169,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private var now: Double { ProcessInfo.processInfo.systemUptime }
 
+    private var modeLabel: String {
+        mode == .automatic ? detectedPlayer.map { "自动 · \($0.label)" } ?? "自动识别" : mode.label
+    }
+
     private var position: Double {
         if demo {
             let elapsed = demoPlaying ? max(0, now - demoSampledAt) : 0
@@ -191,16 +206,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
         let title = NSMenuItem(title: "LyricGlass \(version) · 桌面歌词", action: nil, keyEquivalent: "")
         menu.addItem(title)
-        menu.addItem(NSMenuItem(title: song.map { "\($0.title) — \($0.artist)" } ?? "等待 \(player.label)", action: nil, keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: song.map { "\($0.title) — \($0.artist)" } ?? "等待播放", action: nil, keyEquivalent: ""))
         let playing = demo ? demoPlaying : clock.isPlaying
         menu.addItem(NSMenuItem(title: song == nil ? secondary : "\(time(position)) / \(time(song!.duration)) · \(playing ? "播放中" : "已暂停") · \(source)", action: nil, keyEquivalent: ""))
         menu.addItem(.separator())
-        let players = NSMenuItem(title: "播放器：\(player.label)", action: nil, keyEquivalent: "")
+        let players = NSMenuItem(title: "播放器：\(modeLabel)", action: nil, keyEquivalent: "")
         let choices = NSMenu()
-        for (index, candidate) in DesktopPlayer.allCases.enumerated() {
-            let option = item(candidate.label, #selector(selectPlayer(_:)))
+        for (index, candidate) in PlaybackMode.allCases.enumerated() {
+            let option = item(candidate.label, #selector(selectMode(_:)))
             option.tag = index
-            option.state = candidate == player ? .on : .off
+            option.state = candidate == mode ? .on : .off
             choices.addItem(option)
         }
         players.submenu = choices
@@ -228,7 +243,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(item("清空已缓存歌词", #selector(clearLyricsCache)))
         menu.addItem(item("导入当前歌曲的 LRC…", #selector(importLRC)))
         menu.addItem(.separator())
-        menu.addItem(item("打开 \(player.label)", #selector(openPlayer)))
+        for (index, candidate) in DesktopPlayer.allCases.enumerated() {
+            let option = item("打开 \(candidate.label)", #selector(openPlayer(_:)))
+            option.tag = index
+            menu.addItem(option)
+        }
         menu.addItem(item("重试播放器连接", #selector(reconnect)))
         menu.addItem(item("打开自动化权限设置…", #selector(openPermissions)))
         let demoItem = item("演示模式（自写歌词）", #selector(toggleDemo))
@@ -256,23 +275,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         imports.removeValue(forKey: song.id)
         lookup(song, force: true)
     }
-    @objc private func reconnect() { permissionDenied = false; poll() }
-    @objc private func selectPlayer(_ sender: NSMenuItem) {
-        guard DesktopPlayer.allCases.indices.contains(sender.tag) else { return }
-        let selected = DesktopPlayer.allCases[sender.tag]
-        guard selected != player else { return }
+    @objc private func reconnect() {
+        let monitor = self.monitor!
+        readerQueue.async { [weak self] in
+            monitor.retry()
+            DispatchQueue.main.async { self?.poll() }
+        }
+    }
+    @objc private func selectMode(_ sender: NSMenuItem) {
+        guard PlaybackMode.allCases.indices.contains(sender.tag) else { return }
+        let selected = PlaybackMode.allCases[sender.tag]
+        guard selected != mode else { return }
         modeGeneration += 1
         demo = false
         clearSong()
-        player = selected
-        reader = PlayerReader(player: selected)
-        permissionDenied = false
-        UserDefaults.standard.set(selected.rawValue, forKey: "playbackPlayer")
-        message = "正在连接 \(selected.label)…"
-        secondary = "首次使用请允许读取 \(selected.label) 播放状态"
+        mode = selected
+        detectedPlayer = nil
+        if let pinned = selected.selectedPlayer { player = pinned }
+        UserDefaults.standard.set(selected.rawValue, forKey: "playbackMode")
+        message = selected == .automatic ? "正在识别播放器…" : "正在连接 \(selected.label)…"
+        secondary = "首次使用请允许读取播放器状态"
         poll(); render()
     }
-    @objc private func openPlayer() {
+    @objc private func openPlayer(_ sender: NSMenuItem) {
+        guard DesktopPlayer.allCases.indices.contains(sender.tag) else { return }
+        let player = DesktopPlayer.allCases[sender.tag]
         guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: player.bundleIdentifier) else {
             NSWorkspace.shared.open(URL(string: player == .spotify ? "https://www.spotify.com/download/mac/" : "https://music.apple.com/")!); return
         }
@@ -347,7 +374,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
     @objc private func toggleDemo() {
         if demo {
-            demo = false; modeGeneration += 1; clearSong(); permissionDenied = false; poll()
+            demo = false; modeGeneration += 1; clearSong(); poll()
         } else { startDemo() }
         render()
     }

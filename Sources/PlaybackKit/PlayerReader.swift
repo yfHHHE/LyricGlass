@@ -17,6 +17,8 @@ public struct PlaybackSample {
     public let sampledAt: Double
 }
 
+public enum PlayerPlaybackState { case notRunning, stopped, paused, playing }
+
 public enum PlayerReadError: LocalizedError {
     case notRunning(DesktopPlayer), denied(DesktopPlayer), unavailable(DesktopPlayer, Int), changedTrack, musicMetadataUnavailable
     public var errorDescription: String? {
@@ -81,12 +83,26 @@ public final class PlayerReader {
         notificationLock.withLock { notificationReceived = false; notifiedSong = nil; notificationRevision += 1 }
     }
 
+    // Probe only application-level state, without reading an idle player's track metadata.
+    public func playbackState() throws -> PlayerPlaybackState {
+        guard isRunning() else { cached = nil; clearNotification(); return .notRunning }
+        do {
+            let state = try property("pPlS", false).enumCodeValue
+            if state == fourCC("kPSS") { cached = nil; clearNotification(); return .stopped }
+            return state == fourCC("kPSP") ? .playing : .paused
+        } catch {
+            let code = (error as NSError).code
+            if code == -1743 { throw PlayerReadError.denied(player) }
+            throw PlayerReadError.unavailable(player, code)
+        }
+    }
+
     public func read() throws -> PlaybackSample {
-        guard isRunning() else { cached = nil; clearNotification(); throw PlayerReadError.notRunning(player) }
         do {
             let notification = notificationLock.withLock { (received: notificationReceived, song: notifiedSong, revision: notificationRevision) }
-            let state = try property("pPlS", false).enumCodeValue
-            if state == fourCC("kPSS") {
+            let state = try playbackState()
+            if state == .notRunning { throw PlayerReadError.notRunning(player) }
+            if state == .stopped {
                 cached = nil; clearNotification()
                 return .init(song: nil, position: 0, playing: false, sampledAt: ProcessInfo.processInfo.systemUptime)
             }
@@ -96,7 +112,7 @@ public final class PlayerReader {
                 let sampledAt = ProcessInfo.processInfo.systemUptime
                 guard position.isFinite else { throw PlayerReadError.unavailable(player, -1700) }
                 guard notificationLock.withLock({ notificationRevision == notification.revision }) else { throw PlayerReadError.changedTrack }
-                return .init(song: song, position: max(0, position), playing: state == fourCC("kPSP"), sampledAt: sampledAt)
+                return .init(song: song, position: max(0, position), playing: state == .playing, sampledAt: sampledAt)
             }
             let idCode = player == .spotify ? "ID  " : "pPID"
             var rawID: String?
@@ -119,7 +135,7 @@ public final class PlayerReader {
             } else {
                 guard try readSong(id: cached?.id) == cached else { cached = nil; throw PlayerReadError.changedTrack }
             }
-            return .init(song: cached, position: max(0, position), playing: state == fourCC("kPSP"), sampledAt: sampledAt)
+            return .init(song: cached, position: max(0, position), playing: state == .playing, sampledAt: sampledAt)
         } catch let error as PlayerReadError { throw error }
         catch {
             let code = (error as NSError).code

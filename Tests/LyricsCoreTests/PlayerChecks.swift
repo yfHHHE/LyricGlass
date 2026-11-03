@@ -12,9 +12,11 @@ final class PlayerFixture {
     var artist = "Artist"
     var duration = 187.0
     var errors: [String: Int] = [:]
+    var calls: [String: Int] = [:]
     var afterPosition: (() -> Void)?
 
     func property(_ code: String, track: Bool) throws -> NSAppleEventDescriptor {
+        calls[code, default: 0] += 1
         if let error = errors[code] { throw NSError(domain: NSOSStatusErrorDomain, code: error) }
         if track && !libraryAvailable { throw NSError(domain: NSOSStatusErrorDomain, code: -1728) }
         switch code {

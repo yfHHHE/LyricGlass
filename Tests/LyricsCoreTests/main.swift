@@ -164,7 +164,12 @@ let cases: [(String, () -> Void)] = [
     ("Players keep distinct identities and report permission errors", checkPlayersStayIsolatedAndPermissionErrors),
     ("Music without an ID rejects mixed recordings and invalid notifications", checkMusicMissingIDAndInvalidNotification),
     ("Music pause metadata keeps a stable recording identity", checkMusicNotificationIdentitySurvivesPrecisionChanges),
-    ("Music zero IDs do not reuse another song's lyrics", checkMusicZeroIDDoesNotReuseAnotherSong)
+    ("Music zero IDs do not reuse another song's lyrics", checkMusicZeroIDDoesNotReuseAnotherSong),
+    ("Automatic mode follows Music while Spotify is paused", checkAutomaticPlayerFollowsPlayback),
+    ("Automatic handoffs follow new playback and keep stable ties", checkAutomaticPlayerTransitionsStayStable),
+    ("Automatic mode isolates denied and unresponsive players", checkAutomaticPermissionsAndRecovery),
+    ("Manual mode pins a player and can return to automatic", checkManualModeOverridesAutomaticChoice),
+    ("Automatic mode handles closed apps and missing stream metadata", checkAutomaticEmptyAndStreamingGap)
 ]
 for (name, run) in cases {
     let before = failures
