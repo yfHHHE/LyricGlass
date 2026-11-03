@@ -75,6 +75,56 @@ final class TimelineTests {
         clock.sample(position: 16, duration: 30, playing: true, now: 111)
         checkEqual(timeline.pair(at: clock.position(at: 111.1)).current, "third")
     }
+
+    func testEnglishArtistAliasMatchesChineseCatalog() {
+        let song = Song(id: "alias", title: "一夜一夜一夜", artist: "Crowd Lu", album: "幾分之幾", duration: 247)
+        let record = LyricsRecord(trackName: "一夜一夜一夜", artistName: "卢广仲", albumName: "几分之几", duration: 247)
+        checkTrue(LyricsProvider.matches(record, song: song))
+    }
+
+    func testCollaboratorsAndVersionsStayDistinct() {
+        let song = Song(id: "collab", title: "Afterglow (feat. Guest)", artist: "Lead, Guest", album: "Shared Album", duration: 200)
+        checkTrue(LyricsProvider.matches(.init(trackName: "Afterglow", artistName: "Guest & Lead", albumName: "Shared Album", duration: 200), song: song))
+        checkTrue(LyricsProvider.matches(.init(trackName: "Afterglow", artistName: "Lead", albumName: "Shared Album", duration: 201), song: song))
+        checkFalse(LyricsProvider.matches(.init(trackName: "Afterglow", artistName: "Lead", albumName: "Another Album", duration: 200), song: song))
+        checkFalse(LyricsProvider.matches(.init(trackName: "Afterglow", artistName: "Lead & Stranger", albumName: "Shared Album", duration: 200), song: song))
+        checkFalse(LyricsProvider.matches(.init(trackName: "Afterglow", artistName: "LeadGuest", albumName: "Shared Album", duration: 200), song: song))
+        checkFalse(LyricsProvider.matches(.init(trackName: "Afterglow (Live)", artistName: "Lead, Guest", albumName: "Shared Album", duration: 200), song: song))
+        checkFalse(LyricsProvider.matches(.init(trackName: "Afterglow (DJ Remix)", artistName: "Lead, Guest", albumName: "Shared Album", duration: 200), song: song))
+        checkFalse(LyricsProvider.matches(.init(trackName: "Afterglow - Live", artistName: "Lead", albumName: "Shared Album", duration: 200), song: song))
+    }
+
+    func testCatalogAliasesAndRealTimestamps() {
+        let song = Song(id: "provider-alias", title: "Example", artist: "Catalog English Name", album: "Album", duration: 100)
+        checkTrue(LyricsProvider.matches(.init(trackName: "Example", artistName: "艺名", duration: 100, artistAliases: ["Catalog English Name"]), song: song))
+        checkFalse(LyricsProvider.matches(.init(trackName: "Example", artistName: "艺名", duration: 100), song: song))
+        checkFalse(LyricsRecord(trackName: "Example", artistName: "Artist", duration: 100, syncedLyrics: "[00:00]title\n[00:00]artist").hasSyncedLyrics)
+        checkTrue(LyricsRecord(trackName: "Example", artistName: "Artist", duration: 100, syncedLyrics: "[00:05]one\n[00:10]two").hasSyncedLyrics)
+    }
+
+    func testBilingualDisplayNamesNeedAlbumEvidence() {
+        let song = Song(id: "bilingual", title: "Example", artist: "海風 Sea Breeze", album: "Room", duration: 200)
+        checkTrue(LyricsProvider.matches(.init(trackName: "Example", artistName: "海风", albumName: "Room", duration: 200), song: song))
+        checkTrue(LyricsProvider.matches(.init(trackName: "Example", artistName: "Sea Breeze", albumName: "Room", duration: 200), song: song))
+        checkFalse(LyricsProvider.matches(.init(trackName: "Example", artistName: "海风", albumName: "Elsewhere", duration: 200), song: song))
+        checkFalse(LyricsProvider.matches(.init(trackName: "Example", artistName: "Breeze", albumName: "Room", duration: 200), song: song))
+    }
+
+    func testCacheExpiryAndRecordingIdentity() {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let cache = LyricsDiskCache(directory: directory)
+        let date = Date(timeIntervalSince1970: 1_000_000)
+        let song = Song(id: "same-id", title: "Example", artist: "Artist", album: "Album", duration: 100)
+        let record = LyricsRecord(trackName: "Example", artistName: "Artist", albumName: "Album", duration: 100, syncedLyrics: "[00:05]one\n[00:10]two", source: .qq)
+        do {
+            try cache.store(record, song: song, now: date)
+            checkTrue(cache.load(song: song, now: date)?.cached ?? false)
+            checkNil(cache.load(song: song, now: date.addingTimeInterval(31 * 24 * 60 * 60)))
+            checkNil(cache.load(song: Song(id: "same-id", title: "Example (Live)", artist: "Artist", album: "Album", duration: 100), now: date))
+            checkNil(cache.load(song: Song(id: "same-id", title: "Example", artist: "Artist", album: "Album", duration: 120), now: date))
+        } catch { failures += 1; print("FAIL cache identity: \(error)") }
+    }
 }
 
 
@@ -94,12 +144,34 @@ let cases: [(String, () -> Void)] = [
     ("Prelude, interlude and backwards seek", suite.testPreludeInterludeSeekBackwardAndFinalLine),
     ("Clock pause, resume, seek and stale samples", suite.testClockPauseSeekResumeAndStaleRead),
     ("Recording identity, duration and Chinese matching", suite.testMatchingRejectsDifferentRecordingAndDuration),
-    ("Playback-to-lyrics integration", suite.testPlaybackToLyricsIntegration)
+    ("Playback-to-lyrics integration", suite.testPlaybackToLyricsIntegration),
+    ("English artist alias matches Chinese catalog", suite.testEnglishArtistAliasMatchesChineseCatalog),
+    ("Collaborators match without mixing recording versions", suite.testCollaboratorsAndVersionsStayDistinct),
+    ("Provider aliases and usable timestamps", suite.testCatalogAliasesAndRealTimestamps),
+    ("Bilingual display names require album evidence", suite.testBilingualDisplayNamesNeedAlbumEvidence),
+    ("Cache expiry and recording identity", suite.testCacheExpiryAndRecordingIdentity)
 ]
 for (name, run) in cases {
     let before = failures
     run()
     print("\(failures == before ? "PASS" : "FAIL") \(name)")
 }
-print("\(cases.count) scenarios, \(failures) failures")
-exit(failures == 0 ? 0 : 1)
+let asyncCases: [(String, () async -> Void)] = [
+    ("HTTP retries respect Retry-After", checkHTTPRetry),
+    ("Plain lyrics do not block timed fallback", checkTimedFallback),
+    ("Restarted app reads timed lyrics offline", checkCacheSurvivesRestartOffline),
+    ("Service failures fall through to QQ with correct version", checkQQFallback),
+    ("Long throttles skip the host without blocking other sources", checkLongThrottle),
+    ("Cancellation stops fallback requests", checkCancellation),
+    ("Corrupt cache recovers and clear preserves unrelated files", checkCorruptCache)
+]
+Task {
+    for (name, run) in asyncCases {
+        let before = failures
+        await run()
+        print("\(failures == before ? "PASS" : "FAIL") \(name)")
+    }
+    print("\(cases.count + asyncCases.count) scenarios, \(failures) failures")
+    exit(failures == 0 ? 0 : 1)
+}
+dispatchMain()

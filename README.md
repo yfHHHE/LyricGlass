@@ -24,6 +24,9 @@ Spotify 的 macOS 透明双行桌面歌词。当前一句高亮，下一句预�
 - 右键歌词，或点击菜单栏气泡图标打开设置
 - 歌词每次可提前/延后 0.5 秒，范围 ±15 秒，切歌归零
 - 无匹配歌词时，支持为当前歌曲导入 UTF-8 `.lrc`
+- 自动依次尝试 LRCLIB、网易、QQ Music，普通歌词不会挡住后续来源的同步歌词
+- 支持繁简、部分常见中英文艺名、来源提供的歌手别名和合作歌手匹配，保留版本与曲长校验
+- 匹配成功的同步歌词保存到本机，重启后可离线读取；菜单可清空缓存
 
 ## 常见问题
 
@@ -33,7 +36,9 @@ Spotify 的 macOS 透明双行桌面歌词。当前一句高亮，下一句预�
 
 **找不到歌词或显示服务繁忙？**
 
-歌词来自 [LRCLIB](https://lrclib.net/docs)，并非直接获取 Spotify 内的歌词。覆盖度和时间轴质量因歌曲而异。服务繁忙时可重试；没有时间轴时不会伪造同步滚动，可导入本地 LRC。
+歌词来自 [LRCLIB](https://lrclib.net/docs)、网易和 QQ Music，并非直接获取 Spotify 内的歌词。LRCLIB 没有同步歌词或请求失败时，会继续尝试备用来源。服务繁忙时按等待时间进行有限重试，再切换来源；不把普通歌词当成同步时间轴。
+
+网易、QQ 使用的是社区采用的直接端点，可能因地区、服务调整或访问限制不可用。程序不会使用你的登录 Cookie 或账号，也不会绕过服务的验证码或登录要求。仍无结果时可导入本地 LRC。
 
 **全屏或其他设备播放能用吗？**
 
@@ -41,14 +46,19 @@ Spotify 的 macOS 透明双行桌面歌词。当前一句高亮，下一句预�
 
 **退出后为什么设置恢复默认？**
 
-v0.1.0 的缓存、导入映射、位置、字体和偏移只保留在内存。
+v0.2.0 起，自动匹配成功的同步歌词会保存在本机。手工 LRC 的歌曲关联、窗口位置、字体和偏移仍只保留在本次运行中。
+
+**歌词缓存在哪里，如何清理？**
+
+缓存位于 `~/Library/Application Support/LyricGlass/Lyrics/`，包含歌曲元数据、歌词正文、时间轴和来源。有效期 30 天，最多保存 200 首。点击菜单栏的“清空已缓存歌词”可删除自动缓存并重新匹配当前歌曲；“重新匹配歌词”会优先重新请求网络，网络全部不可用时保留已验证的缓存作为兜底。
 
 ## 隐私与第三方服务
 
 - 通过 Spotify 的 Apple events 属性读取当前歌曲、播放状态与进度，不读取账号凭据
-- 向 `https://lrclib.net` 发送歌名、歌手、专辑与时长，用于匹配歌词
+- 向 `lrclib.net`、`music.163.com` 和 `c.y.qq.com` 发送匹配所需的歌曲元数据或歌词来源 ID
+- 网易可能建立仅属于本 app 的匿名内存会话，不读取浏览器或 Spotify 的登录 Cookie
 - 不上传音频、Spotify token、账号信息或导入的本地 LRC
-- 没有项目自行添加的遥测或分析服务，不在磁盘保存歌词缓存
+- 没有项目自行添加的遥测或分析服务；自动匹配成功的同步歌词按上述规则保存在本机，不上传到项目仓库
 - 安装包不包含第三方歌词；第三方服务内容及权利归各自权利人
 
 本项目独立于 Spotify，与 Spotify 无隶属关系。源码公开供查看，尚未指定开源许可证。
@@ -60,7 +70,7 @@ v0.1.0 的缓存、导入映射、位置、字体和偏移只保留在内存。
 ```sh
 ./run.command                  # 构建并打开本机构架版本
 ./run.command --demo           # 用自写歌词演示，不读取 Spotify、不请求网络
-./scripts/check.sh             # 6 组核心回归，不访问网络
+./scripts/check.sh             # 核心及多源回退回归，不访问网络
 ./scripts/build-app.sh --universal
 ./scripts/package-release.sh   # 生成 Universal DMG、ZIP 和 SHA256SUMS.txt
 ```
@@ -71,13 +81,14 @@ app 输出在 `dist/LyricGlass.app`。Release 包仅为本地 ad-hoc 签名，�
 
 ```sh
 dist/LyricGlass.app/Contents/MacOS/LyricGlass --check-lyrics
+dist/LyricGlass.app/Contents/MacOS/LyricGlass --check-lyrics --title Galaxies --artist 'Laura Veirs' --album 'Year of Meteors' --duration 216 --fresh
 dist/LyricGlass.app/Contents/MacOS/LyricGlass --diagnose-spotify
 ```
 
-`--check-lyrics` 仅查询固定公开测试曲的元数据与时间戳行数；`--diagnose-spotify` 在本地输出当前播放状态，权限可能记在宿主终端名下，以 app 实际运行的授权为准。
+`--check-lyrics` 默认测试固定公开曲目，也可指定歌曲；仅输出匹配元数据、来源、缓存命中、耗时和时间戳行数，不打印歌词正文。可用 `--source lrclib|netease|qq` 单独检查来源，用 `--cache-dir <目录>` 指定诊断缓存位置。`--diagnose-spotify` 在本地输出当前播放状态，权限可能记在宿主终端名下，以 app 实际运行的授权为准。
 
 ## 同步方式与验证范围
 
-每 0.5 秒读取 Spotify，在两次采样间用 monotonic clock 推进；读数超过 2 秒未刷新则冻结。按歌名、歌手和时长匹配歌词，容许时长差 ±2 秒，保留 live/remix 等版本名，并做繁简归一。切歌时取消旧请求并校验歌曲身份，避免旧请求覆盖新歌。
+每 0.5 秒读取 Spotify，在两次采样间用 monotonic clock 推进；读数超过 2 秒未刷新则冻结。按歌名、歌手和时长匹配歌词，容许时长差 ±2 秒，保留 live/remix 等版本名，并做繁简归一。合作歌手按名字集合匹配，来源只列主唱时还必须匹配专辑。艺名支持少量明确的对照及来源返回的别名，未收录的别名仍可能漏匹配。切歌时取消旧请求并校验歌曲身份，避免旧请求覆盖新歌。
 
-核心回归覆盖时间戳与偏移、同时刻双语行、前奏/间奏、暂停与继续、前后跳转、过期读数冻结、版本匹配和播放时钟到歌词选择的组合场景。Spotify 实际播放同步已在 Apple Silicon 上验证；Intel 构建和其他 macOS 版本尚未完成硬件实测。
+回归覆盖时间戳、播放同步、艺名及合作歌手、多源回退、服务重试与长时间限流、请求取消、离线重启、缓存损坏、缓存过期及录音身份校验。Spotify 实际播放同步已在 Apple Silicon 上验证；Intel 构建和其他 macOS 版本尚未完成硬件实测。

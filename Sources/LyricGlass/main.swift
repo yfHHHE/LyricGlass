@@ -1,15 +1,39 @@
 import AppKit
 import LyricsCore
 
+func argument(_ flag: String) -> String? {
+    guard let i = CommandLine.arguments.firstIndex(of: flag), i + 1 < CommandLine.arguments.count else { return nil }
+    return CommandLine.arguments[i + 1]
+}
+
 if CommandLine.arguments.contains("--check-lyrics") {
-    // Network-only smoke check. Reports metadata and timestamp count, never the lyric text.
+    // Metadata-only diagnostics: never print or upload lyric contents.
+    let title = argument("--title") ?? "Yellow"
+    let artist = argument("--artist") ?? "Coldplay"
+    let album = argument("--album") ?? "Parachutes"
+    guard let duration = Double(argument("--duration") ?? "266"), duration.isFinite, duration > 0 else {
+        fputs("--duration must be a positive number of seconds\n", stderr); exit(2)
+    }
+    let selected = argument("--source")
+    guard selected == nil || selected == "all" || LyricsSource(rawValue: selected!) != nil else {
+        fputs("--source must be all, lrclib, netease or qq\n", stderr); exit(2)
+    }
     Task {
         do {
-            let song = Song(id: "probe", title: "Yellow", artist: "Coldplay", album: "Parachutes", duration: 266)
-            let record = try await LyricsProvider().fetch(song: song)
+            let started = ProcessInfo.processInfo.systemUptime
+            let cache = argument("--cache-dir").map { URL(fileURLWithPath: $0, isDirectory: true) }
+            let sources = selected.flatMap(LyricsSource.init(rawValue:)).map { [$0] } ?? LyricsSource.allCases
+            let song = Song(id: "probe:\(title):\(artist)", title: title, artist: artist, album: album, duration: duration)
+            let provider = LyricsProvider(cacheDirectory: cache, sources: sources)
+            let record = try await provider.fetch(song: song, forceReload: CommandLine.arguments.contains("--fresh"))
             let count = LyricsTimeline(lrc: record.syncedLyrics ?? "").lines.count
-            print("LRCLIB OK: \(record.trackName), \(record.artistName), \(record.duration)s, timed lines=\(count)")
-            exit(count > 0 ? 0 : 2)
+            let output: [String: Any] = ["title": record.trackName, "artist": record.artistName, "album": record.albumName ?? "",
+                "duration": record.duration, "source": record.sourceKind.rawValue, "cached": record.cached,
+                "synced": record.hasSyncedLyrics, "timed_lines": count,
+                "elapsed_ms": Int((ProcessInfo.processInfo.systemUptime - started) * 1000)]
+            let data = try JSONSerialization.data(withJSONObject: output, options: [.sortedKeys])
+            print(String(data: data, encoding: .utf8)!)
+            exit(record.hasSyncedLyrics ? 0 : 2)
         } catch { fputs("Lyrics check failed: \(error.localizedDescription)\n", stderr); exit(1) }
     }
     dispatchMain()

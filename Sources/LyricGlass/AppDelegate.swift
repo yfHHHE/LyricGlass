@@ -6,6 +6,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var statusItem: NSStatusItem!
     private var panel: LyricsPanel!
     private let reader = SpotifyReader()
+    private let lyricsProvider = LyricsProvider()
     private let readerQueue = DispatchQueue(label: "ai.yufan.lyricglass.spotify", qos: .userInitiated)
     private var pollTimer: Timer?
     private var renderTimer: Timer?
@@ -17,8 +18,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var clock = PlaybackClock()
     private var song: Song?
     private var timeline: LyricsTimeline?
-    private var cache: [String: LyricsRecord] = [:]
     private var imports: [String: LyricsTimeline] = [:]
+    private var selectedSource: LyricsSource?
     private var message = "正在连接 Spotify…"
     private var secondary = "首次使用请允许读取 Spotify 播放状态"
     private var source = ""
@@ -97,7 +98,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if song != nil {
             lookupGeneration += 1
             lyricsTask?.cancel()
-            song = nil; timeline = nil; source = ""
+            song = nil; timeline = nil; source = ""; selectedSource = nil
         }
         clock.sample(position: 0, duration: 0, playing: false, now: now)
     }
@@ -110,16 +111,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         message = "正在查找歌词…"
         secondary = "\(track.title) · \(track.artist)"
         source = "匹配中"
+        selectedSource = nil
         if let imported = imports[track.id] {
             timeline = imported; source = "本地 LRC"; return
         }
-        if !force, let record = cache[track.id] { apply(record); return }
         lyricsTask = Task { @MainActor [weak self] in
             do {
-                let record = try await LyricsProvider().fetch(song: track)
-                guard let self, !Task.isCancelled, self.lookupGeneration == generation, self.song?.id == track.id else { return }
-                if self.cache.count >= 64 { self.cache.removeAll() }
-                self.cache[track.id] = record
+                guard let self else { return }
+                let record = try await self.lyricsProvider.fetch(song: track, forceReload: force)
+                guard !Task.isCancelled, self.lookupGeneration == generation, self.song?.id == track.id else { return }
                 self.apply(record)
             } catch {
                 guard let self, !Task.isCancelled, self.lookupGeneration == generation, self.song?.id == track.id else { return }
@@ -136,17 +136,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func apply(_ record: LyricsRecord) {
-        source = "LRCLIB"
+        source = record.sourceLabel
+        selectedSource = record.sourceKind
         if record.instrumental {
             message = "纯音乐 ♪"; secondary = "让音乐继续"; return
         }
-        if let lrc = record.syncedLyrics {
+        if record.hasSyncedLyrics, let lrc = record.syncedLyrics {
             let parsed = LyricsTimeline(lrc: lrc)
             if parsed.lines.contains(where: { !$0.text.isEmpty }) { timeline = parsed; return }
         }
         message = "这首歌暂时没有逐行时间轴"
         secondary = record.plainLyrics?.components(separatedBy: .newlines).first(where: { !$0.isEmpty }) ?? "可从菜单导入 LRC 歌词"
-        source = "LRCLIB · 未同步"
+        source += " · 未同步"
     }
 
     private var now: Double { ProcessInfo.processInfo.systemUptime }
@@ -181,7 +182,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func makeMenu() {
         menu.removeAllItems()
-        let title = NSMenuItem(title: "LyricGlass · Spotify 桌面歌词", action: nil, keyEquivalent: "")
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
+        let title = NSMenuItem(title: "LyricGlass \(version) · Spotify 桌面歌词", action: nil, keyEquivalent: "")
         menu.addItem(title)
         menu.addItem(NSMenuItem(title: song.map { "\($0.title) — \($0.artist)" } ?? "等待 Spotify", action: nil, keyEquivalent: ""))
         let playing = demo ? demoPlaying : clock.isPlaying
@@ -207,6 +209,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(item("歌词延后 0.5 秒", #selector(later)))
         menu.addItem(item("重置歌词偏移", #selector(resetOffset)))
         menu.addItem(item("重新匹配歌词", #selector(retryLyrics)))
+        menu.addItem(item("清空已缓存歌词", #selector(clearLyricsCache)))
         menu.addItem(item("导入当前歌曲的 LRC…", #selector(importLRC)))
         menu.addItem(.separator())
         menu.addItem(item("打开 Spotify", #selector(openSpotify)))
@@ -221,7 +224,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             menu.addItem(item("演示：从头播放", #selector(restartDemo)))
         }
         menu.addItem(.separator())
-        menu.addItem(item("歌词来源：LRCLIB", #selector(openSource)))
+        menu.addItem(item(selectedSource.map { "歌词来源：\($0.label)" } ?? "歌词来源：自动多源", #selector(openSource)))
         menu.addItem(item("退出 LyricGlass", #selector(quit), key: "q"))
     }
 
@@ -245,8 +248,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
     }
     @objc private func openPermissions() { NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation")!) }
-    @objc private func openSource() { NSWorkspace.shared.open(URL(string: "https://lrclib.net")!) }
+    @objc private func openSource() { NSWorkspace.shared.open(selectedSource?.website ?? URL(string: "https://github.com/yfHHHE/LyricGlass")!) }
     @objc private func quit() { NSApp.terminate(nil) }
+
+    @objc private func clearLyricsCache() {
+        lookupGeneration += 1
+        lyricsTask?.cancel()
+        Task { @MainActor in
+            do {
+                try await lyricsProvider.clearCache()
+                if !demo, let song { lookup(song, force: true) }
+            } catch {
+                let alert = NSAlert()
+                alert.messageText = "暂时无法清空歌词缓存"
+                alert.informativeText = error.localizedDescription
+                NSApp.activate(ignoringOtherApps: true); alert.runModal()
+            }
+        }
+    }
 
     @objc private func importLRC() {
         guard let song else {
@@ -270,7 +289,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
             lyricsTask?.cancel(); lookupGeneration += 1
             imports[song.id] = parsed
-            timeline = parsed; source = "本地 LRC"; render()
+            timeline = parsed; source = "本地 LRC"; selectedSource = nil; render()
         } catch {
             let alert = NSAlert(); alert.messageText = "无法导入歌词"
             alert.informativeText = error.localizedDescription; alert.runModal()
@@ -293,6 +312,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         [00:39.00]
         """)
         source = "自写歌词 · 演示"
+        selectedSource = nil
     }
     @objc private func toggleDemo() {
         if demo {

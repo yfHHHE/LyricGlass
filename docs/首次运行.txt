@@ -1,4 +1,4 @@
-LyricGlass v0.1.0 · 公开测试版
+LyricGlass v0.2.0 · 公开测试版
 
 系统要求：macOS 13 或更高版本，Apple Silicon 或 Intel Mac，Spotify 桌面客户端
 
@@ -20,8 +20,12 @@ Apple 官方说明：https://support.apple.com/102445
 操作：拖动歌词移动位置；右键歌词或点击菜单栏气泡图标，调整字号、时间偏移和鼠标穿透
 没有歌词或服务正忙：可重试，也可为当前歌曲导入 UTF-8 的 .lrc 文件
 
-歌曲名称、歌手、专辑和时长会发往 lrclib.net，用于匹配歌词
+应用会依次尝试 LRCLIB、网易、QQ Music；服务不可用或没有同步歌词时会尝试下一个来源
+匹配所需的歌曲元数据或歌词 ID 会发往 lrclib.net、music.163.com 和 c.y.qq.com
+网易仅建立属于本 app 的匿名内存会话，不使用你的登录 Cookie 或账号
 不上传 Spotify 账号信息、token、音频或本地 LRC 文件
-此版本的设置与歌词缓存仅保留在内存，退出后恢复默认
+自动匹配成功的同步歌词保存在 ~/Library/Application Support/LyricGlass/Lyrics/，有效期 30 天，最多 200 首
+重启后可离线使用已缓存的同步歌词；菜单里的“清空已缓存歌词”可删除这些缓存
+窗口、字号、偏移和手工歌词关联仍在退出后恢复默认
 
 项目与下载：https://github.com/yfHHHE/LyricGlass
