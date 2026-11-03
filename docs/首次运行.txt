@@ -1,11 +1,12 @@
-LyricGlass v0.2.1 · 公开测试版
+LyricGlass v0.3.0 · 公开测试版
 
-系统要求：macOS 13 或更高版本，Apple Silicon 或 Intel Mac，Spotify 桌面客户端
+系统要求：macOS 13 或更高版本，Apple Silicon 或 Intel Mac，Spotify 或系统“音乐”桌面客户端
 
 1. 把 LyricGlass.app 拖进 Applications（应用程序）
 2. 打开 LyricGlass.app；它会在菜单栏显示气泡图标，在屏幕底部显示透明双行歌词
-3. 首次使用时，允许 LyricGlass 读取 Spotify 的自动化权限
-4. 在 Spotify 桌面端播放歌曲，等待歌词匹配
+3. 右键歌词或点击菜单栏气泡图标，在“播放器”菜单选择 Spotify 或 Apple Music
+4. 首次使用时，允许 LyricGlass 读取所选播放器的自动化权限
+5. 在所选桌面播放器播放歌曲，等待歌词匹配；下次启动会记住播放器选择
 
 此版本使用本地 ad-hoc 签名，没有 Apple Developer ID 签名和公证
 如果 macOS 阻止打开，请先核实下载来自本项目 GitHub Release
@@ -13,9 +14,13 @@ LyricGlass v0.2.1 · 公开测试版
 受组织管理的 Mac 可能不允许此操作，需要联系设备管理员
 Apple 官方说明：https://support.apple.com/102445
 
-如果 Spotify 自动化权限曾被拒绝：
-系统设置 → 隐私与安全性 → 自动化 → LyricGlass → Spotify
-打开后，再点菜单栏里的“重试 Spotify 连接”
+如果播放器自动化权限曾被拒绝：
+系统设置 → 隐私与安全性 → 自动化 → LyricGlass → Spotify / 音乐
+打开后，再点菜单栏里的“重试播放器连接”
+
+如果 Apple Music 流媒体歌曲没有曲目信息：
+部分 macOS 版本无法直接读取未入库歌曲的元数据，应用会用 Music 播放通知补充
+先选择 Apple Music 再播放；如果启动 app 前已经播放，请暂停后继续一次，或切换歌曲
 
 操作：拖动歌词移动位置；右键歌词或点击菜单栏气泡图标，调整字号、时间偏移和鼠标穿透
 没有歌词或服务正忙：可重试，也可为当前歌曲导入 UTF-8 的 .lrc 文件
@@ -23,9 +28,9 @@ Apple 官方说明：https://support.apple.com/102445
 应用会依次尝试 LRCLIB、网易、QQ Music、酷狗；服务不可用或没有同步歌词时会尝试下一个来源
 匹配所需的歌曲元数据或歌词 ID 会发往 lrclib.net、music.163.com、c.y.qq.com 和 lyrics.kugou.com
 网易仅建立属于本 app 的匿名内存会话，不使用你的登录 Cookie 或账号
-不上传 Spotify 账号信息、token、音频或本地 LRC 文件
+不上传 Spotify / Apple Music 账号信息、token、音频或本地 LRC 文件
 自动匹配成功的同步歌词保存在 ~/Library/Application Support/LyricGlass/Lyrics/，有效期 30 天，最多 200 首
 重启后可离线使用已缓存的同步歌词；菜单里的“清空已缓存歌词”可删除这些缓存
-窗口、字号、偏移和手工歌词关联仍在退出后恢复默认
+播放器选择会保存在本机；窗口、字号、偏移和手工歌词关联仍在退出后恢复默认
 
 项目与下载：https://github.com/yfHHHE/LyricGlass

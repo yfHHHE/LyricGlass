@@ -35,7 +35,7 @@ public actor LyricsHTTPClient {
         guard let host = request.url?.host, request.url?.scheme == "https" else { throw URLError(.badURL) }
         if let cooldown = cooldowns[host], cooldown.until > Date() { throw LyricsLookupError.http(cooldown.status) }
         request.timeoutInterval = 7
-        request.setValue("LyricGlass/0.2.1 (https://github.com/yfHHHE/LyricGlass)", forHTTPHeaderField: "User-Agent")
+        request.setValue("LyricGlass/0.3.0 (https://github.com/yfHHHE/LyricGlass)", forHTTPHeaderField: "User-Agent")
         for attempt in 0...1 {
             try Task.checkCancellation()
             let data: Data, response: HTTPURLResponse

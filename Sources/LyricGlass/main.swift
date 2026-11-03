@@ -1,5 +1,6 @@
 import AppKit
 import LyricsCore
+import PlaybackKit
 
 func argument(_ flag: String) -> String? {
     guard let i = CommandLine.arguments.firstIndex(of: flag), i + 1 < CommandLine.arguments.count else { return nil }
@@ -37,19 +38,35 @@ if CommandLine.arguments.contains("--check-lyrics") {
         } catch { fputs("Lyrics check failed: \(error.localizedDescription)\n", stderr); exit(1) }
     }
     dispatchMain()
-} else if CommandLine.arguments.contains("--diagnose-spotify") {
+} else if CommandLine.arguments.contains("--diagnose-spotify") || CommandLine.arguments.contains("--diagnose-player") {
+    let selected = CommandLine.arguments.contains("--diagnose-spotify") ? "spotify" : argument("--player") ?? "spotify"
+    guard let player = DesktopPlayer(rawValue: selected),
+          let watch = Double(argument("--watch") ?? "0"), watch.isFinite, (0...120).contains(watch) else {
+        fputs("Use --player spotify|apple-music and --watch 0...120 seconds\n", stderr); exit(2)
+    }
+    let reader = PlayerReader(player: player)
     let outputFlag = CommandLine.arguments.firstIndex(of: "--output")
     let output = outputFlag.flatMap { $0 + 1 < CommandLine.arguments.count ? CommandLine.arguments[$0 + 1] : nil }
-    let result: [String: Any]
-    do {
-        let sample = try SpotifyReader().read()
-        result = ["ok": true, "title": sample.song?.title ?? "", "artist": sample.song?.artist ?? "",
+    func diagnose() {
+      let result: [String: Any]
+      do {
+        let sample = try reader.read()
+        result = ["ok": true, "player": player.rawValue, "title": sample.song?.title ?? "", "artist": sample.song?.artist ?? "",
                   "album": sample.song?.album ?? "", "duration": sample.song?.duration ?? 0,
                   "position": sample.position, "playing": sample.playing]
-    } catch { result = ["ok": false, "error": error.localizedDescription] }
-    let data = try! JSONSerialization.data(withJSONObject: result, options: [.prettyPrinted, .sortedKeys])
-    if let output { try? data.write(to: URL(fileURLWithPath: output)) }
-    print(String(data: data, encoding: .utf8)!)
+      } catch { result = ["ok": false, "player": player.rawValue, "error": error.localizedDescription] }
+      let data = try! JSONSerialization.data(withJSONObject: result, options: [.sortedKeys])
+      if let output { try? data.write(to: URL(fileURLWithPath: output)) }
+      print(String(data: data, encoding: .utf8)!)
+      fflush(stdout)
+    }
+    diagnose()
+    if watch > 0 {
+        let timer = Timer(timeInterval: 1, repeats: true) { _ in diagnose() }
+        RunLoop.main.add(timer, forMode: .common)
+        RunLoop.main.run(until: Date().addingTimeInterval(watch))
+        timer.invalidate()
+    }
 } else {
     let app = NSApplication.shared
     let delegate = AppDelegate()

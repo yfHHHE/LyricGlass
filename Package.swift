@@ -7,7 +7,8 @@ let package = Package(
     products: [.executable(name: "LyricGlass", targets: ["LyricGlass"])],
     targets: [
         .target(name: "LyricsCore"),
-        .executableTarget(name: "LyricGlass", dependencies: ["LyricsCore"]),
-        .executableTarget(name: "LyricsCoreChecks", dependencies: ["LyricsCore"], path: "Tests/LyricsCoreTests")
+        .target(name: "PlaybackKit", dependencies: ["LyricsCore"]),
+        .executableTarget(name: "LyricGlass", dependencies: ["LyricsCore", "PlaybackKit"]),
+        .executableTarget(name: "LyricsCoreChecks", dependencies: ["LyricsCore", "PlaybackKit"], path: "Tests/LyricsCoreTests")
     ]
 )

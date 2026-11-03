@@ -1,13 +1,15 @@
 import AppKit
 import LyricsCore
+import PlaybackKit
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     let menu = NSMenu()
     private var statusItem: NSStatusItem!
     private var panel: LyricsPanel!
-    private let reader = SpotifyReader()
+    private var player = DesktopPlayer(rawValue: UserDefaults.standard.string(forKey: "playbackPlayer") ?? "") ?? .spotify
+    private var reader: PlayerReader!
     private let lyricsProvider = LyricsProvider()
-    private let readerQueue = DispatchQueue(label: "ai.yufan.lyricglass.spotify", qos: .userInitiated)
+    private let readerQueue = DispatchQueue(label: "ai.yufan.lyricglass.playback", qos: .userInitiated)
     private var pollTimer: Timer?
     private var renderTimer: Timer?
     private var polling = false
@@ -20,8 +22,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var timeline: LyricsTimeline?
     private var imports: [String: LyricsTimeline] = [:]
     private var selectedSource: LyricsSource?
-    private var message = "正在连接 Spotify…"
-    private var secondary = "首次使用请允许读取 Spotify 播放状态"
+    private var message = "正在连接播放器…"
+    private var secondary = "首次使用请允许读取播放器状态"
     private var source = ""
     private var demo = false
     private var demoPlaying = true
@@ -30,12 +32,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var offset = 0.0
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        reader = PlayerReader(player: player)
+        message = "正在连接 \(player.label)…"
         NSApp.setActivationPolicy(.accessory)
         panel = LyricsPanel()
         panel.orderFrontRegardless()
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         statusItem.button?.image = NSImage(systemSymbolName: "text.bubble.fill", accessibilityDescription: "LyricGlass 歌词菜单")
-        statusItem.button?.toolTip = "LyricGlass · Spotify 桌面歌词"
+        statusItem.button?.toolTip = "LyricGlass · 桌面歌词"
         statusItem.menu = menu
         menu.delegate = self
         makeMenu()
@@ -58,19 +62,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard !demo, !polling, !permissionDenied else { return }
         polling = true
         let generation = modeGeneration
+        let reader = self.reader!
         readerQueue.async { [weak self] in
             guard let self else { return }
-            let result = Result { try self.reader.read() }
+            let result = Result { try reader.read() }
             DispatchQueue.main.async {
                 self.polling = false
                 guard !self.demo, self.modeGeneration == generation else { return }
                 switch result {
                 case .success(let sample): self.accept(sample)
                 case .failure(let error):
-                    if case SpotifyReadError.changedTrack = error { return }
-                    if case SpotifyReadError.denied = error { self.permissionDenied = true }
+                    if case PlayerReadError.changedTrack = error { return }
+                    if case PlayerReadError.denied = error { self.permissionDenied = true }
                     self.clearSong()
-                    self.message = "等待 Spotify"
+                    self.message = "等待 \(self.player.label)"
                     self.secondary = error.localizedDescription
                     self.render()
                 }
@@ -78,16 +83,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    private func accept(_ sample: SpotifySample) {
+    private func accept(_ sample: PlaybackSample) {
         guard let track = sample.song else {
             clearSong()
-            message = "Spotify 尚未播放歌曲"
+            message = "\(player.label) 尚未播放歌曲"
             secondary = "播放一首歌，歌词会自动出现"
             return
         }
         clock.sample(position: sample.position, duration: track.duration, playing: sample.playing, now: sample.sampledAt)
-        if song?.id != track.id {
-            song = track
+        let changed = song?.id != track.id || song.map { abs($0.duration - track.duration) > 2 } == true
+        song = track
+        if changed {
             offset = 0
             lookup(track)
         }
@@ -166,8 +172,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let playing = demo ? demoPlaying : clock.isPlaying
         let info: String
         if let song {
-            info = "\(demo ? "DEMO · " : "")\(song.artist) · \(song.title)   \(time(position)) / \(time(song.duration))   \(playing ? "播放中" : "已暂停")   \(source)   偏移 \(String(format: "%+.1fs", offset))   拖动可移动 · 右键菜单"
-        } else { info = "LyricGlass · 从菜单栏打开 Spotify 或检查自动化权限" }
+            info = "\(demo ? "DEMO" : player.label) · \(song.artist) · \(song.title)   \(time(position)) / \(time(song.duration))   \(playing ? "播放中" : "已暂停")   \(source)   偏移 \(String(format: "%+.1fs", offset))   拖动可移动 · 右键菜单"
+        } else { info = "LyricGlass · 从菜单栏选择播放器或检查自动化权限" }
         panel.lyricsView.show(current: pair?.current ?? message, next: pair?.next ?? secondary, detail: info)
         statusItem.button?.toolTip = song.map { "\($0.title) · \($0.artist)\(playing ? "" : " · 已暂停")" } ?? secondary
     }
@@ -183,12 +189,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func makeMenu() {
         menu.removeAllItems()
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
-        let title = NSMenuItem(title: "LyricGlass \(version) · Spotify 桌面歌词", action: nil, keyEquivalent: "")
+        let title = NSMenuItem(title: "LyricGlass \(version) · 桌面歌词", action: nil, keyEquivalent: "")
         menu.addItem(title)
-        menu.addItem(NSMenuItem(title: song.map { "\($0.title) — \($0.artist)" } ?? "等待 Spotify", action: nil, keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: song.map { "\($0.title) — \($0.artist)" } ?? "等待 \(player.label)", action: nil, keyEquivalent: ""))
         let playing = demo ? demoPlaying : clock.isPlaying
         menu.addItem(NSMenuItem(title: song == nil ? secondary : "\(time(position)) / \(time(song!.duration)) · \(playing ? "播放中" : "已暂停") · \(source)", action: nil, keyEquivalent: ""))
         menu.addItem(.separator())
+        let players = NSMenuItem(title: "播放器：\(player.label)", action: nil, keyEquivalent: "")
+        let choices = NSMenu()
+        for (index, candidate) in DesktopPlayer.allCases.enumerated() {
+            let option = item(candidate.label, #selector(selectPlayer(_:)))
+            option.tag = index
+            option.state = candidate == player ? .on : .off
+            choices.addItem(option)
+        }
+        players.submenu = choices
+        menu.addItem(players)
         menu.addItem(item(panel.isVisible ? "隐藏歌词" : "显示歌词", #selector(toggleVisible)))
         let lock = item("锁定位置 / 鼠标穿透", #selector(toggleLock))
         lock.state = panel.ignoresMouseEvents ? .on : .off
@@ -212,8 +228,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(item("清空已缓存歌词", #selector(clearLyricsCache)))
         menu.addItem(item("导入当前歌曲的 LRC…", #selector(importLRC)))
         menu.addItem(.separator())
-        menu.addItem(item("打开 Spotify", #selector(openSpotify)))
-        menu.addItem(item("重试 Spotify 连接", #selector(reconnect)))
+        menu.addItem(item("打开 \(player.label)", #selector(openPlayer)))
+        menu.addItem(item("重试播放器连接", #selector(reconnect)))
         menu.addItem(item("打开自动化权限设置…", #selector(openPermissions)))
         let demoItem = item("演示模式（自写歌词）", #selector(toggleDemo))
         demoItem.state = demo ? .on : .off
@@ -241,9 +257,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         lookup(song, force: true)
     }
     @objc private func reconnect() { permissionDenied = false; poll() }
-    @objc private func openSpotify() {
-        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.spotify.client") else {
-            NSWorkspace.shared.open(URL(string: "https://www.spotify.com/download/mac/")!); return
+    @objc private func selectPlayer(_ sender: NSMenuItem) {
+        guard DesktopPlayer.allCases.indices.contains(sender.tag) else { return }
+        let selected = DesktopPlayer.allCases[sender.tag]
+        guard selected != player else { return }
+        modeGeneration += 1
+        demo = false
+        clearSong()
+        player = selected
+        reader = PlayerReader(player: selected)
+        permissionDenied = false
+        UserDefaults.standard.set(selected.rawValue, forKey: "playbackPlayer")
+        message = "正在连接 \(selected.label)…"
+        secondary = "首次使用请允许读取 \(selected.label) 播放状态"
+        poll(); render()
+    }
+    @objc private func openPlayer() {
+        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: player.bundleIdentifier) else {
+            NSWorkspace.shared.open(URL(string: player == .spotify ? "https://www.spotify.com/download/mac/" : "https://music.apple.com/")!); return
         }
         NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
     }
@@ -270,7 +301,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func importLRC() {
         guard let song else {
             let alert = NSAlert()
-            alert.messageText = "请先在 Spotify 播放一首歌"
+            alert.messageText = "请先在 \(player.label) 播放一首歌"
             alert.informativeText = "导入的歌词会关联当前歌曲"
             NSApp.activate(ignoringOtherApps: true); alert.runModal(); return
         }

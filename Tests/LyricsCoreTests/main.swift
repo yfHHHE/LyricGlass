@@ -158,7 +158,13 @@ let cases: [(String, () -> Void)] = [
     ("Collaborators match without mixing recording versions", suite.testCollaboratorsAndVersionsStayDistinct),
     ("Provider aliases and usable timestamps", suite.testCatalogAliasesAndRealTimestamps),
     ("Bilingual display names require album evidence", suite.testBilingualDisplayNamesNeedAlbumEvidence),
-    ("Cache expiry and recording identity", suite.testCacheExpiryAndRecordingIdentity)
+    ("Cache expiry and recording identity", suite.testCacheExpiryAndRecordingIdentity),
+    ("Apple Music seconds, pause and seek reach the lyric timeline", checkAppleMusicReadAndSeek),
+    ("Apple Music streams use notifications without stale tracks", checkAppleMusicStreamingNotifications),
+    ("Players keep distinct identities and report permission errors", checkPlayersStayIsolatedAndPermissionErrors),
+    ("Music without an ID rejects mixed recordings and invalid notifications", checkMusicMissingIDAndInvalidNotification),
+    ("Music pause metadata keeps a stable recording identity", checkMusicNotificationIdentitySurvivesPrecisionChanges),
+    ("Music zero IDs do not reuse another song's lyrics", checkMusicZeroIDDoesNotReuseAnotherSong)
 ]
 for (name, run) in cases {
     let before = failures

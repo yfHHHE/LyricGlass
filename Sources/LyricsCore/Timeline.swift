@@ -86,7 +86,7 @@ public struct PlaybackClock: Sendable {
     }
 
     public func position(at now: Double) -> Double {
-        // Stop extrapolating if Spotify stops answering; never let stale playback run forever.
+        // Stop extrapolating if the selected player stops answering.
         let elapsed = isPlaying ? min(2, max(0, now - sampledAt)) : 0
         return min(duration, position + elapsed)
     }
