@@ -5,6 +5,7 @@ struct IslandGeometry {
     var screenFrame: NSRect
     var topInset: CGFloat
     var notchWidth: CGFloat
+    var topOffset: CGFloat = 0
 
     init(screenFrame: NSRect, topInset: CGFloat = 0, notchWidth: CGFloat = 0) {
         self.screenFrame = screenFrame; self.topInset = topInset; self.notchWidth = notchWidth
@@ -16,13 +17,13 @@ struct IslandGeometry {
             notchWidth = max(0, right.minX - left.maxX)
         } else { notchWidth = 0 }
     }
-    var hasNotch: Bool { topInset > 0 }
-    var contentTopInset: CGFloat { hasNotch ? topInset + 10 : 12 }
-    func frame(expanded: Bool, width: CGFloat, height: CGFloat) -> NSRect {
-        let desiredWidth = expanded ? max(width, notchWidth + 100) : max(280, notchWidth + 100)
+    var hasNotch: Bool { topInset > topOffset }
+    var contentTopInset: CGFloat { hasNotch ? topInset - topOffset + 10 : 12 }
+    func frame(expanded: Bool, width: CGFloat, height: CGFloat, compactWidth: CGFloat = 420, compactHeight: CGFloat = 24) -> NSRect {
+        let desiredWidth = max(expanded ? max(width, compactWidth) : compactWidth, hasNotch ? notchWidth + 100 : 0)
         let actualWidth = min(desiredWidth, max(1, screenFrame.width - 24))
-        let actualHeight = min(expanded ? height : max(32, topInset + 6), max(1, screenFrame.height - 12))
-        return NSRect(x: screenFrame.midX - actualWidth / 2, y: screenFrame.maxY - actualHeight,
+        let actualHeight = min(expanded ? height : max(compactHeight, hasNotch ? topInset - topOffset + 4 : 0), max(1, screenFrame.height - topOffset - 12))
+        return NSRect(x: screenFrame.midX - actualWidth / 2, y: screenFrame.maxY - topOffset - actualHeight,
                       width: actualWidth, height: actualHeight)
     }
 }
@@ -85,21 +86,26 @@ final class IslandPanel: NSPanel {
     }
     func reposition() {
         guard let screen = NSScreen.screens.first ?? NSScreen.main else { return }
-        islandView.geometry = IslandGeometry(screen: screen)
+        var geometry = IslandGeometry(screen: screen)
+        geometry.topOffset = style.presentation.islandAppearance.topOffset
+        islandView.geometry = geometry
         islandView.expanded = expanded
         resizeToFitContent()
     }
     private func resizeToFitContent() {
-        let target = islandView.geometry.frame(expanded: expanded, width: style.presentation.islandWidth,
-                                               height: islandView.expandedHeight)
+        let target = targetFrame
         if target != frame { setFrame(target, display: true) }
+    }
+    private var targetFrame: NSRect {
+        let options = style.presentation.islandAppearance
+        return islandView.geometry.frame(expanded: expanded, width: style.presentation.islandWidth,
+            height: islandView.expandedHeight, compactWidth: options.compactWidth, compactHeight: options.compactHeight)
     }
     func setExpanded(_ value: Bool, animated: Bool = true) {
         guard expanded != value else { return }
         expanded = value
         islandView.expanded = value
-        let frame = islandView.geometry.frame(expanded: value, width: style.presentation.islandWidth,
-                                              height: islandView.expandedHeight)
+        let frame = targetFrame
         if animated && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
             NSAnimationContext.runAnimationGroup { context in
                 context.duration = 0.18
@@ -112,8 +118,8 @@ final class IslandPanel: NSPanel {
 
 final class IslandView: NSView {
     let controls = PlaybackControls(dark: true)
-    let current = NSTextField(labelWithString: "")
-    let next = NSTextField(labelWithString: "")
+    let current = LyricsTextField("")
+    let next = LyricsTextField("")
     let compact = NSButton()
     let textViewport = LyricsTextViewport()
     private let track = NSTextField(labelWithString: "LyricGlass")
@@ -126,6 +132,7 @@ final class IslandView: NSView {
     private var fraction: CGFloat = 0
     private var measuredWidth: CGFloat = -1
     private var measuredHeights: (CGFloat, CGFloat) = (0, 0)
+    private var compactFontSize: CGFloat = -1
     var onPreferredHeightChange: (() -> Void)?
     var onHover: ((Bool) -> Void)?
     var onExpand: (() -> Void)?
@@ -182,10 +189,14 @@ final class IslandView: NSView {
         return measuredHeights
     }
     var expandedHeight: CGFloat {
-        let width = geometry.frame(expanded: true, width: style.presentation.islandWidth, height: 1).width - 40
+        let width = geometry.frame(expanded: true, width: style.presentation.islandWidth, height: 1,
+            compactWidth: style.presentation.islandAppearance.compactWidth).width - 40
         let (first, second) = textHeights(width: width)
-        return geometry.contentTopInset + 22 + first + (style.presentation.showNextLine ? style.lineGap + second : 0)
+        let preferred = geometry.contentTopInset + 22 + first + (style.presentation.showNextLine ? style.lineGap + second : 0)
             + (style.presentation.showControls ? 38 : 0) + 14
+        let minimum = geometry.contentTopInset + 22 + LyricsTypography.lineHeight(style: style, size: primarySize, bold: style.bold)
+            + (style.presentation.showControls ? 38 : 0) + 14
+        return min(preferred, max(minimum, style.presentation.islandAppearance.expandedMaxHeight))
     }
     func apply(_ value: LyricsAppearance) {
         style = value.normalized()
@@ -207,9 +218,11 @@ final class IslandView: NSView {
         let metadata = error.isEmpty ? [title, artist].filter { !$0.isEmpty }.joined(separator: " · ") : error
         if track.stringValue != metadata { track.stringValue = metadata }
         let compactText = geometry.hasNotch ? "" : "  " + text
-        if compact.attributedTitle.string != compactText {
+        let fontSize = min(12, max(10, style.presentation.islandAppearance.compactHeight - 6))
+        if compact.attributedTitle.string != compactText || compactFontSize != fontSize {
+            compactFontSize = fontSize
             compact.attributedTitle = NSAttributedString(string: compactText, attributes: [
-                .font: NSFont.systemFont(ofSize: 12, weight: .medium), .foregroundColor: NSColor.white])
+                .font: NSFont.systemFont(ofSize: fontSize, weight: .medium), .foregroundColor: NSColor.white])
         }
         compact.setAccessibilityValue(text)
         compact.toolTip = [title, text, error].filter { !$0.isEmpty }.joined(separator: "\n")
@@ -228,12 +241,14 @@ final class IslandView: NSView {
         for view in [track, textViewport, settings, progressTrack, progress] { view.isHidden = !expanded }
         next.isHidden = !expanded || !style.presentation.showNextLine
         controls.isHidden = !expanded || !style.presentation.showControls
-        layer?.cornerRadius = expanded ? 22 : 16
+        layer?.cornerRadius = style.presentation.islandAppearance.shape.radius(height: bounds.height, expanded: expanded)
     }
     override func layout() {
         super.layout()
-        compact.frame = NSRect(x: 14, y: 2, width: max(0, bounds.width - 52), height: bounds.height - 4)
-        status.frame = NSRect(x: bounds.width - 32, y: (bounds.height - 16) / 2, width: 16, height: 16)
+        layer?.cornerRadius = style.presentation.islandAppearance.shape.radius(height: bounds.height, expanded: expanded)
+        compact.frame = NSRect(x: 10, y: 2, width: max(0, bounds.width - 44), height: bounds.height - 4)
+        let iconSize = min(14, bounds.height - 6)
+        status.frame = NSRect(x: bounds.width - 28, y: (bounds.height - iconSize) / 2, width: iconSize, height: iconSize)
         var top = bounds.height - geometry.contentTopInset
         track.frame = NSRect(x: 40, y: top - 16, width: max(0, bounds.width - 80), height: 16)
         settings.frame = NSRect(x: bounds.width - 32, y: top - 19, width: 24, height: 24)

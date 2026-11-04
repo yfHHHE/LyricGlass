@@ -3,6 +3,13 @@ import AppKit
 private let longLyric = String(repeating: "让旋律穿过漫长街道 stay with me 直到每一个字都被看见，", count: 3) + "终章 END"
 
 private func requireCompleteGlyphLayout(_ label: NSTextField) throws {
+    if let label = label as? LyricsTextField {
+        let height = label.height(fittingWidth: label.bounds.width)
+        try require(label.laidOutUTF16Count == label.attributedStringValue.length, "Core Text must lay out every character, including the end")
+        try require(height <= label.bounds.height + 0.5, "Every line's glyph ink must fit its allocated field")
+        try require(label.maximumNumberOfLines == 0 && !label.allowsDefaultTighteningForTruncation, "Wrapping must remain unlimited without tightening")
+        return
+    }
     let storage = NSTextStorage(attributedString: label.attributedStringValue)
     let manager = NSLayoutManager()
     let drawing = label.cell?.drawingRect(forBounds: label.bounds) ?? label.bounds

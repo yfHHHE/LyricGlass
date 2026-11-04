@@ -54,6 +54,7 @@ enum LyricsTypography {
     }
 
     static func wrappedHeight(_ label: NSTextField, width: CGFloat, minimum: CGFloat) -> CGFloat {
+        if let label = label as? LyricsTextField { return label.height(fittingWidth: width) }
         let bounds = NSRect(x: 0, y: 0, width: max(1, width), height: .greatestFiniteMagnitude)
         // Measure the actual field cell, including its insets and mixed-font glyphs.
         return max(minimum, ceil(label.cell?.cellSize(forBounds: bounds).height ?? minimum) + 4)

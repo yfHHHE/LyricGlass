@@ -35,6 +35,7 @@ final class AppearanceSettings: NSObject, NSWindowDelegate, NSTextFieldDelegate 
     private let showNextLine = NSSwitch()
     private let showPlaybackControls = NSSwitch()
     private let islandPinned = NSSwitch()
+    private let islandShape = NSPopUpButton()
     private let playerMode = NSPopUpButton()
     private let trackTitle = NSTextField(labelWithString: "等待播放")
     private let trackArtist = NSTextField(labelWithString: "")
@@ -352,7 +353,20 @@ final class AppearanceSettings: NSObject, NSWindowDelegate, NSTextFieldDelegate 
         let restore = NSButton(title: "恢复主屏位置", target: self, action: #selector(restoreDesktop)); SettingsNativeControls.button(restore)
         passthrough.toolTip = "开启后仍可从菜单栏进入设置解除"
         fullWidth(section("桌面窗口", rows: [slider("桌面歌词宽度", tag: 6, minimum: 480, maximum: 1400), row("始终置顶", top), row("鼠标穿透", passthrough), row("窗口位置", restore)]), in: body)
-        fullWidth(section("顶部灵动岛", rows: [row("保持展开", islandPinned), slider("展开宽度", tag: 7, minimum: 320, maximum: 720)]), in: body)
+        islandShape.addItems(withTitles: IslandShape.allCases.map(\.title))
+        islandShape.target = self; islandShape.action = #selector(presentationChanged(_:))
+        islandShape.alignment = .right
+        islandShape.setAccessibilityLabel("顶部窗口形状"); SettingsNativeControls.button(islandShape)
+        fullWidth(section("顶部灵动岛", rows: [
+            row("形状", islandShape),
+            slider("收起宽度", tag: 8, minimum: 180, maximum: 1000),
+            slider("收起高度", tag: 9, minimum: 18, maximum: 64),
+            slider("距屏幕顶部", tag: 11, minimum: 0, maximum: 80),
+            row("保持展开", islandPinned),
+            slider("展开宽度", tag: 7, minimum: 320, maximum: 1000),
+            slider("展开最大高度", tag: 10, minimum: 160, maximum: 720)
+        ]), in: body)
+        fullWidth(label("展开宽度不小于收起宽度；刘海屏自动避开摄像头", size: 11, color: SettingsPalette.muted), in: body)
         advancedButton.setButtonType(.onOff); advancedButton.isBordered = false; advancedButton.alignment = .left
         advancedButton.font = .systemFont(ofSize: 12); advancedButton.contentTintColor = SettingsPalette.secondary
         advancedButton.image = NSImage(systemSymbolName: "chevron.right", accessibilityDescription: nil)
@@ -482,6 +496,8 @@ final class AppearanceSettings: NSObject, NSWindowDelegate, NSTextFieldDelegate 
         showPlaybackControls.state = style.presentation.showControls ? .on : .off
         islandPinned.state = style.presentation.islandPinned ? .on : .off
         islandPinned.isEnabled = style.presentation.mode.showsIsland
+        islandShape.selectItem(at: IslandShape.allCases.firstIndex(of: style.presentation.islandAppearance.shape) ?? 0)
+        islandShape.isEnabled = style.presentation.mode.showsIsland
         petToggle.state = style.petEnabled ? .on : .off
         petMotion.selectItem(at: PetMotion.allCases.firstIndex(of: style.petMotion) ?? 1)
         petMotion.isEnabled = style.petEnabled
@@ -497,11 +513,13 @@ final class AppearanceSettings: NSObject, NSWindowDelegate, NSTextFieldDelegate 
         syncFont(englishFont, choice: style.englishFont, width: englishFontWidth)
         background.selectedSegment = BackgroundMode.allCases.firstIndex(of: style.background)!
         theme.selectItem(at: style.glassTheme)
-        let numbers = [style.primarySize, style.secondarySize, style.opacity * 100, style.cornerRadius, style.padding, style.lineGap, style.presentation.desktopWidth, style.presentation.islandWidth]
+        let island = style.presentation.islandAppearance
+        let numbers = [style.primarySize, style.secondarySize, style.opacity * 100, style.cornerRadius, style.padding, style.lineGap, style.presentation.desktopWidth, style.presentation.islandWidth, island.compactWidth, island.compactHeight, island.expandedMaxHeight, island.topOffset]
         for (tag, number) in numbers.enumerated() { sliders[tag]?.doubleValue = number; values[tag]?.doubleValue = number }
         sliders[5]?.isEnabled = style.presentation.showNextLine; values[5]?.isEnabled = style.presentation.showNextLine
         sliders[6]?.isEnabled = style.presentation.mode.showsDesktop; values[6]?.isEnabled = style.presentation.mode.showsDesktop
         sliders[7]?.isEnabled = style.presentation.mode.showsIsland; values[7]?.isEnabled = style.presentation.mode.showsIsland
+        for tag in 8...11 { sliders[tag]?.isEnabled = style.presentation.mode.showsIsland; values[tag]?.isEnabled = style.presentation.mode.showsIsland }
         for (tag, hex) in [style.primaryColor, style.secondaryColor, style.backgroundColor].enumerated() {
             wells[tag]?.color = NSColor(hex: hex) ?? .white; hexFields[tag]?.stringValue = "#" + hex
         }
@@ -552,7 +570,16 @@ final class AppearanceSettings: NSObject, NSWindowDelegate, NSTextFieldDelegate 
         case 4: style.padding = number
         case 5: style.lineGap = number
         case 6: style.presentation.desktopWidth = number
-        case 7: style.presentation.islandWidth = number
+        case 7:
+            style.presentation.islandWidth = max(number, style.presentation.islandAppearance.compactWidth)
+            syncControls()
+        case 8:
+            style.presentation.islandAppearance.compactWidth = number
+            style.presentation.islandWidth = max(style.presentation.islandWidth, number)
+            syncControls()
+        case 9: style.presentation.islandAppearance.compactHeight = number
+        case 10: style.presentation.islandAppearance.expandedMaxHeight = number
+        case 11: style.presentation.islandAppearance.topOffset = number
         default: return
         }
         apply()
@@ -597,6 +624,9 @@ final class AppearanceSettings: NSObject, NSWindowDelegate, NSTextFieldDelegate 
         style.presentation.showNextLine = showNextLine.state == .on
         style.presentation.showControls = showPlaybackControls.state == .on
         style.presentation.islandPinned = islandPinned.state == .on
+        if IslandShape.allCases.indices.contains(islandShape.indexOfSelectedItem) {
+            style.presentation.islandAppearance.shape = IslandShape.allCases[islandShape.indexOfSelectedItem]
+        }
         syncControls(); apply()
     }
     @objc private func languageChanged(_ sender: NSSegmentedControl) {

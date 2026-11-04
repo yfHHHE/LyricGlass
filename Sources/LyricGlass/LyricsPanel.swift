@@ -2,6 +2,12 @@ import AppKit
 
 final class LyricsPanel: NSPanel {
     let lyricsView = LyricsView(frame: NSRect(x: 0, y: 0, width: 940, height: 170))
+    private(set) var transportPanel: DesktopTransportPanel!
+    private var lyricsHovered = false
+    private var transportHovered = false
+    private var allowsControls = true
+    private var hideControls: DispatchWorkItem?
+    private var windowObservers: [NSObjectProtocol] = []
 
     init() {
         super.init(contentRect: lyricsView.frame, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
@@ -14,6 +20,14 @@ final class LyricsPanel: NSPanel {
         isReleasedWhenClosed = false
         isMovableByWindowBackground = true
         contentView = lyricsView
+        transportPanel = DesktopTransportPanel(controls: lyricsView.controls)
+        lyricsView.onHoverChange = { [weak self] in self?.lyricsHovered = $0; self?.updateTransport() }
+        transportPanel.onHover = { [weak self] in self?.transportHovered = $0; self?.updateTransport() }
+        for name in [NSWindow.didMoveNotification, NSWindow.didResizeNotification] {
+            windowObservers.append(NotificationCenter.default.addObserver(forName: name, object: self, queue: .main) { [weak self] _ in
+                guard let self else { return }; self.transportPanel.position(near: self)
+            })
+        }
         lyricsView.onPreferredHeightChange = { [weak self] in self?.resizeForLyrics() }
         apply(LyricsAppearance())
         centerAtBottom()
@@ -21,15 +35,45 @@ final class LyricsPanel: NSPanel {
 
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
+    deinit {
+        hideControls?.cancel()
+        for observer in windowObservers { NotificationCenter.default.removeObserver(observer) }
+    }
+    override func orderOut(_ sender: Any?) {
+        hideControls?.cancel(); hideTransport()
+        lyricsHovered = false; transportHovered = false
+        super.orderOut(sender)
+        lyricsView.setHovered(false)
+    }
+    private func hideTransport() {
+        guard let transportPanel else { return }
+        if transportPanel.parent != nil { removeChildWindow(transportPanel) }
+        transportPanel.orderOut(nil); transportHovered = false
+    }
+    private func updateTransport() {
+        hideControls?.cancel()
+        guard allowsControls, isVisible else { hideTransport(); return }
+        if lyricsHovered || transportHovered {
+            transportPanel.position(near: self)
+            lyricsView.controls.isHidden = false
+            if transportPanel.parent == nil { addChildWindow(transportPanel, ordered: .above) }
+            transportPanel.orderFrontRegardless()
+        } else {
+            let work = DispatchWorkItem { [weak self] in self?.hideTransport() }
+            hideControls = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: work)
+        }
+    }
 
     func apply(_ style: LyricsAppearance) {
+        allowsControls = style.presentation.showControls && !style.clickThrough
         lyricsView.apply(style)
         var frame = self.frame
         let center = frame.midX
         let visible = (screen ?? NSScreen.screens.first)?.visibleFrame
         frame.size.width = min(style.presentation.desktopWidth, max(1, (visible?.width ?? 980) - 40))
         frame.origin.x = center - frame.width / 2
-        frame.size.height = min(lyricsView.height(fittingWidth: frame.width), max(1, (visible?.height ?? 900) - 16))
+        frame.size.height = min(lyricsView.height(fittingWidth: frame.width), max(1, (visible?.height ?? 900) - 80))
         if let visible {
             frame.origin.x = min(visible.maxX - frame.width, max(visible.minX, frame.minX))
             frame.origin.y = min(visible.maxY - frame.height, max(visible.minY, frame.minY))
@@ -38,12 +82,13 @@ final class LyricsPanel: NSPanel {
         level = style.alwaysOnTop ? .floating : .normal
         ignoresMouseEvents = style.clickThrough
         if style.clickThrough { lyricsView.setHovered(false) }
+        updateTransport()
     }
 
     private func resizeForLyrics() {
         var frame = self.frame
         let visible = (screen ?? NSScreen.screens.first)?.visibleFrame
-        frame.size.height = min(lyricsView.height(fittingWidth: frame.width), max(1, (visible?.height ?? 900) - 16))
+        frame.size.height = min(lyricsView.height(fittingWidth: frame.width), max(1, (visible?.height ?? 900) - 80))
         if let visible { frame.origin.y = min(visible.maxY - frame.height, max(visible.minY, frame.minY)) }
         if self.frame != frame { setFrame(frame, display: true) }
     }
@@ -53,7 +98,7 @@ final class LyricsPanel: NSPanel {
         guard let screen = NSScreen.screens.first ?? NSScreen.main else { return }
         let visible = screen.visibleFrame
         let width = min(lyricsView.preferredWidth, visible.width - 40)
-        let height = min(lyricsView.height(fittingWidth: width), max(1, visible.height - 16))
+        let height = min(lyricsView.height(fittingWidth: width), max(1, visible.height - 80))
         setFrame(NSRect(x: visible.midX - width / 2, y: min(visible.minY + 44, visible.maxY - height),
                         width: width, height: height), display: true)
     }
@@ -61,21 +106,22 @@ final class LyricsPanel: NSPanel {
 
 // The settings preview and the real lyrics window use this same renderer.
 final class LyricsView: NSView {
-    let current = NSTextField(labelWithString: "正在连接播放器…")
-    let next = NSTextField(labelWithString: "桌面透明双行歌词")
+    let current = LyricsTextField("正在连接播放器…")
+    let next = LyricsTextField("桌面透明双行歌词")
     let effect = NSVisualEffectView()
     let pet = RaindropPetView(frame: .zero)
     let controls = PlaybackControls()
     let textViewport = LyricsTextViewport()
     private let tint = NSView()
     private let hoverTint = NSView()
-    private let detail = NSTextField(labelWithString: "")
+    private var detail = ""
     private var tracking: NSTrackingArea?
     private var hovered = false
     private var style = LyricsAppearance()
     private var measuredWidth: CGFloat = -1
     private var measuredHeights: (CGFloat, CGFloat) = (0, 0)
     var onPreferredHeightChange: (() -> Void)?
+    var onHoverChange: ((Bool) -> Void)?
     var onContextMenu: ((NSEvent, NSView) -> Void)?
     var onPlaybackAction: ((SettingsAction) -> Void)? {
         didSet { controls.onAction = onPlaybackAction }
@@ -89,17 +135,15 @@ final class LyricsView: NSView {
         effect.material = .hudWindow
         effect.state = .active
         for view in [tint, hoverTint] { view.wantsLayer = true }
-        for view in [effect, tint, hoverTint, pet, textViewport, detail, controls] { addSubview(view) }
+        for view in [effect, tint, hoverTint, pet, textViewport] { addSubview(view) }
         for label in [current, next] { textViewport.textDocument.addSubview(label) }
-        for label in [current, next, detail] {
+        for label in [current, next] {
             label.alignment = .center
             label.lineBreakMode = .byTruncatingTail
             label.maximumNumberOfLines = 1
             label.isSelectable = false
         }
         for label in [current, next] { LyricsTypography.configureWrapping(label) }
-        detail.font = .systemFont(ofSize: 11, weight: .medium)
-        detail.isHidden = true
         setAccessibilityElement(true)
         setAccessibilityRole(.group)
         setAccessibilityLabel(desktop ? "LyricGlass 桌面双行歌词" : "实时双行歌词外观预览")
@@ -109,7 +153,7 @@ final class LyricsView: NSView {
 
     private func textHeights(width: CGFloat) -> (CGFloat, CGFloat) {
         if measuredWidth != width {
-            let available = max(1, width - style.padding * 2 - (style.petEnabled ? 110 : 0))
+            let available = max(1, width - style.padding * 2 - (style.petEnabled ? petSize + 10 : 0))
             measuredHeights = (
                 LyricsTypography.wrappedHeight(current, width: available, minimum: LyricsTypography.lineHeight(style: style, size: style.primarySize, bold: style.bold)),
                 style.presentation.showNextLine ? LyricsTypography.wrappedHeight(next, width: available, minimum: LyricsTypography.lineHeight(style: style, size: style.secondarySize, bold: false)) : 0)
@@ -117,17 +161,17 @@ final class LyricsView: NSView {
         }
         return measuredHeights
     }
-    private var controlsHeight: CGFloat { style.presentation.showControls ? 34 : 0 }
+    private var petSize: CGFloat { min(72, max(40, style.primarySize + (style.presentation.showNextLine ? style.secondarySize : 0))) }
     var preferredWidth: CGFloat { style.presentation.desktopWidth }
     func height(fittingWidth width: CGFloat) -> CGFloat {
         let (first, second) = textHeights(width: width)
-        return max(style.petEnabled ? 150 : 100, first + second + (style.presentation.showNextLine ? style.lineGap : 0) + 58 + controlsHeight)
+        return max(style.petEnabled ? petSize + 12 : 24, first + second + (style.presentation.showNextLine ? style.lineGap : 0) + 16)
     }
     var preferredHeight: CGFloat { height(fittingWidth: bounds.width > 0 ? bounds.width : preferredWidth) }
     var preferredPreviewHeight: CGFloat { preferredHeight + 24 }
 
     func updatePlayback(playing: Bool, enabled: Bool) {
-        controls.update(playing: playing, enabled: enabled, color: NSColor(hex: style.primaryColor))
+        controls.update(playing: playing, enabled: enabled, color: .white)
     }
 
     private func updateText(_ label: NSTextField, text: String) {
@@ -144,7 +188,7 @@ final class LyricsView: NSView {
         let changed = current.stringValue != text || next.stringValue != upcoming
         if current.stringValue != text { updateText(current, text: text) }
         if next.stringValue != upcoming { updateText(next, text: upcoming) }
-        if detail.stringValue != info { detail.stringValue = info }
+        if detail != info { detail = info; toolTip = info; controls.toolTip = info }
         if changed { needsLayout = true; onPreferredHeightChange?() }
     }
 
@@ -167,7 +211,6 @@ final class LyricsView: NSView {
             label.layer?.shadowOffset = CGSize(width: 0, height: -1)
             label.layer?.masksToBounds = false
         }
-        detail.textColor = NSColor(hex: style.primaryColor)?.withAlphaComponent(0.75)
         setHovered(hovered)
         needsLayout = true
         layoutSubtreeIfNeeded()
@@ -182,17 +225,15 @@ final class LyricsView: NSView {
         let (firstHeight, nextHeight) = textHeights(width: bounds.width)
         let gap = style.presentation.showNextLine ? style.lineGap : 0
         let total = firstHeight + nextHeight + gap
-        textViewport.frame = NSRect(x: 0, y: controlsHeight + 12, width: bounds.width, height: max(0, bounds.height - controlsHeight - 48))
+        textViewport.frame = NSRect(x: 0, y: 8, width: bounds.width, height: max(0, bounds.height - 16))
         textViewport.fitDocument(height: total)
         let bottom = max(0, (textViewport.textDocument.bounds.height - total) / 2)
-        let petSize: CGFloat = 100
+        let petSize = self.petSize
         let reserved = style.petEnabled ? petSize + 10 : 0
         pet.frame = NSRect(x: style.padding - 4, y: (bounds.height - petSize) / 2 - 2, width: petSize, height: petSize)
         let width = max(0, bounds.width - style.padding * 2 - reserved)
         current.frame = NSRect(x: style.padding + reserved, y: bottom + nextHeight + gap, width: width, height: firstHeight)
         next.frame = NSRect(x: style.padding + reserved, y: bottom, width: width, height: nextHeight)
-        detail.frame = NSRect(x: 18, y: bounds.height - 26, width: max(0, bounds.width - 36), height: 18)
-        controls.frame = NSRect(x: (bounds.width - 144) / 2, y: 6, width: 144, height: 32)
     }
 
     override func updateTrackingAreas() {
@@ -206,8 +247,7 @@ final class LyricsView: NSView {
     override func mouseExited(with event: NSEvent) { setHovered(false) }
     func setHovered(_ value: Bool) {
         hovered = value
-        detail.isHidden = !value || detail.stringValue.isEmpty
-        controls.isHidden = !value || !style.presentation.showControls
+        onHoverChange?(value)
         hoverTint.layer?.backgroundColor = NSColor.black.withAlphaComponent(value && style.background == .transparent ? 0.25 : 0).cgColor
     }
     override func rightMouseDown(with event: NSEvent) { onContextMenu?(event, self) }

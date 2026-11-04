@@ -145,7 +145,30 @@ enum LyricsDisplayMode: String, Codable, CaseIterable {
     var showsIsland: Bool { self != .desktop }
 }
 
+enum IslandShape: String, Codable, CaseIterable {
+    case capsule, roundedRectangle, rectangle
+    var title: String {
+        switch self { case .capsule: return "胶囊"; case .roundedRectangle: return "圆角长方形"; case .rectangle: return "长方形" }
+    }
+    func radius(height: CGFloat, expanded: Bool) -> CGFloat {
+        switch self { case .capsule: return expanded ? 22 : height / 2; case .roundedRectangle: return 6; case .rectangle: return 0 }
+    }
+}
+
+struct IslandAppearance: Codable, Equatable {
+    var compactWidth = 420.0
+    var compactHeight = 24.0
+    var expandedMaxHeight = 320.0
+    var topOffset = 0.0
+    var shape: IslandShape = .capsule
+}
+
 struct LyricsPresentation: Codable, Equatable {
+    private var islandOptions: IslandAppearance?
+    var islandAppearance: IslandAppearance {
+        get { islandOptions ?? IslandAppearance() }
+        set { islandOptions = newValue }
+    }
     var mode: LyricsDisplayMode = .both
     var desktopWidth = 940.0
     var islandWidth = 480.0
@@ -257,7 +280,14 @@ extension LyricsAppearance {
         var value = self
         var presentation = self.presentation
         presentation.desktopWidth = presentation.desktopWidth.isFinite ? min(1400, max(480, presentation.desktopWidth)) : 940
-        presentation.islandWidth = presentation.islandWidth.isFinite ? min(720, max(320, presentation.islandWidth)) : 480
+        presentation.islandWidth = presentation.islandWidth.isFinite ? min(1000, max(320, presentation.islandWidth)) : 480
+        var island = presentation.islandAppearance
+        island.compactWidth = island.compactWidth.isFinite ? min(1000, max(180, island.compactWidth)) : 420
+        island.compactHeight = island.compactHeight.isFinite ? min(64, max(18, island.compactHeight)) : 24
+        island.expandedMaxHeight = island.expandedMaxHeight.isFinite ? min(720, max(160, island.expandedMaxHeight)) : 320
+        island.topOffset = island.topOffset.isFinite ? min(80, max(0, island.topOffset)) : 0
+        presentation.islandWidth = max(presentation.islandWidth, island.compactWidth)
+        presentation.islandAppearance = island
         value.presentation = presentation
         value.petEnabled = petEnabled
         value.petMotion = petMotion
