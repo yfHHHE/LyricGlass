@@ -24,8 +24,15 @@ final class LyricsPanel: NSPanel {
     func apply(_ style: LyricsAppearance) {
         lyricsView.apply(style)
         var frame = self.frame
+        let center = frame.midX
+        let visible = (screen ?? NSScreen.screens.first)?.visibleFrame
+        frame.size.width = min(style.presentation.desktopWidth, max(1, (visible?.width ?? 980) - 40))
+        frame.origin.x = center - frame.width / 2
         frame.size.height = lyricsView.preferredHeight
-        if let visible = screen?.visibleFrame, frame.maxY > visible.maxY { frame.origin.y = visible.maxY - frame.height }
+        if let visible {
+            frame.origin.x = min(visible.maxX - frame.width, max(visible.minX, frame.minX))
+            frame.origin.y = min(visible.maxY - frame.height, max(visible.minY, frame.minY))
+        }
         setFrame(frame, display: true)
         level = style.alwaysOnTop ? .floating : .normal
         ignoresMouseEvents = style.clickThrough
@@ -36,7 +43,7 @@ final class LyricsPanel: NSPanel {
         // Keep reopened lyrics discoverable on multi-monitor Macs.
         guard let screen = NSScreen.screens.first ?? NSScreen.main else { return }
         let visible = screen.visibleFrame
-        let width = min(940, visible.width - 40)
+        let width = min(lyricsView.preferredWidth, visible.width - 40)
         setFrame(NSRect(x: visible.midX - width / 2, y: visible.minY + 44,
                         width: width, height: lyricsView.preferredHeight), display: true)
     }
@@ -48,6 +55,7 @@ final class LyricsView: NSView {
     let next = NSTextField(labelWithString: "桌面透明双行歌词")
     let effect = NSVisualEffectView()
     let pet = RaindropPetView(frame: .zero)
+    let controls = PlaybackControls()
     private let tint = NSView()
     private let hoverTint = NSView()
     private let detail = NSTextField(labelWithString: "")
@@ -55,6 +63,9 @@ final class LyricsView: NSView {
     private var hovered = false
     private var style = LyricsAppearance()
     var onContextMenu: ((NSEvent, NSView) -> Void)?
+    var onPlaybackAction: ((SettingsAction) -> Void)? {
+        didSet { controls.onAction = onPlaybackAction }
+    }
 
     init(frame: NSRect, desktop: Bool = true) {
         super.init(frame: frame)
@@ -64,7 +75,7 @@ final class LyricsView: NSView {
         effect.material = .hudWindow
         effect.state = .active
         for view in [tint, hoverTint] { view.wantsLayer = true }
-        for view in [effect, tint, hoverTint, pet, current, next, detail] { addSubview(view) }
+        for view in [effect, tint, hoverTint, pet, current, next, detail, controls] { addSubview(view) }
         for label in [current, next, detail] {
             label.alignment = .center
             label.lineBreakMode = .byTruncatingTail
@@ -82,8 +93,15 @@ final class LyricsView: NSView {
 
     private var currentHeight: CGFloat { LyricsTypography.lineHeight(style: style, size: style.primarySize, bold: style.bold) }
     private var nextHeight: CGFloat { LyricsTypography.lineHeight(style: style, size: style.secondarySize, bold: false) }
-    var preferredHeight: CGFloat { max(150, currentHeight + nextHeight + style.lineGap + 58) }
-    var preferredPreviewHeight: CGFloat { currentHeight + nextHeight + style.lineGap + 40 }
+    private var textHeight: CGFloat { currentHeight + (style.presentation.showNextLine ? nextHeight + style.lineGap : 0) }
+    private var controlsHeight: CGFloat { style.presentation.showControls ? 34 : 0 }
+    var preferredWidth: CGFloat { style.presentation.desktopWidth }
+    var preferredHeight: CGFloat { max(style.petEnabled ? 150 : 100, textHeight + 58 + controlsHeight) }
+    var preferredPreviewHeight: CGFloat { textHeight + 40 + controlsHeight }
+
+    func updatePlayback(playing: Bool, enabled: Bool) {
+        controls.update(playing: playing, enabled: enabled, color: NSColor(hex: style.primaryColor))
+    }
 
     private func updateText(_ label: NSTextField, text: String) {
         let primary = label === current
@@ -102,6 +120,7 @@ final class LyricsView: NSView {
     func apply(_ value: LyricsAppearance) {
         style = value.normalized()
         pet.setEnabled(style.petEnabled)
+        next.isHidden = !style.presentation.showNextLine
         layer?.cornerRadius = style.cornerRadius
         effect.isHidden = style.background != .frosted
         effect.alphaValue = style.opacity
@@ -128,16 +147,18 @@ final class LyricsView: NSView {
         effect.frame = bounds
         tint.frame = bounds
         hoverTint.frame = bounds
-        let firstHeight = currentHeight, nextHeight = self.nextHeight
-        let total = firstHeight + nextHeight + style.lineGap
-        let bottom = max(8, (bounds.height - total - 20) / 2)
+        let firstHeight = currentHeight, nextHeight = style.presentation.showNextLine ? self.nextHeight : 0
+        let gap = style.presentation.showNextLine ? style.lineGap : 0
+        let total = firstHeight + nextHeight + gap
+        let bottom = max(8, (bounds.height - controlsHeight - total - 20) / 2) + controlsHeight
         let petSize = min(100, max(64, bounds.height - 36))
         let reserved = style.petEnabled ? petSize + 10 : 0
         pet.frame = NSRect(x: style.padding - 4, y: (bounds.height - petSize) / 2 - 2, width: petSize, height: petSize)
         let width = max(0, bounds.width - style.padding * 2 - reserved)
-        current.frame = NSRect(x: style.padding + reserved, y: bottom + nextHeight + style.lineGap, width: width, height: firstHeight)
+        current.frame = NSRect(x: style.padding + reserved, y: bottom + nextHeight + gap, width: width, height: firstHeight)
         next.frame = NSRect(x: style.padding + reserved, y: bottom, width: width, height: nextHeight)
         detail.frame = NSRect(x: 18, y: current.frame.maxY + 8, width: max(0, bounds.width - 36), height: 18)
+        controls.frame = NSRect(x: (bounds.width - 144) / 2, y: 6, width: 144, height: 32)
     }
 
     override func updateTrackingAreas() {
@@ -152,6 +173,7 @@ final class LyricsView: NSView {
     func setHovered(_ value: Bool) {
         hovered = value
         detail.isHidden = !value || detail.stringValue.isEmpty
+        controls.isHidden = !value || !style.presentation.showControls
         hoverTint.layer?.backgroundColor = NSColor.black.withAlphaComponent(value && style.background == .transparent ? 0.25 : 0).cgColor
     }
     override func rightMouseDown(with event: NSEvent) { onContextMenu?(event, self) }

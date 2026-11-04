@@ -15,6 +15,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var menu: NSMenu { quickMenu.menu }
     private var statusItem: NSStatusItem!
     private var panel: LyricsPanel!
+    private var island: IslandPanel!
+    private var lyricsVisible = true
+    private var screenObserver: NSObjectProtocol?
     private let appearanceStore = AppearanceStore()
     private lazy var appearance = appearanceStore.load()
     private var appearanceSettings: AppearanceSettings?
@@ -46,6 +49,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var offset = 0.0
     private let petAudio = PetAudioReaction()
     private var petAudioArmed = false
+    private let playerController = PlayerController()
+    private let commandQueue = DispatchQueue(label: "ai.yufan.lyricglass.controls", qos: .userInitiated)
+    private var controlInFlight = false
+    private var controlError = ""
+    private var controlErrorUntil = 0.0
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         if let selected = mode.selectedPlayer { player = selected }
@@ -56,11 +64,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         catch { NSLog("Could not load bundled OpenDyslexic: %@", error.localizedDescription) }
         panel = LyricsPanel()
         panel.apply(appearance)
+        panel.lyricsView.onPlaybackAction = { [weak self] in self?.performSettingsAction($0) }
+        island = IslandPanel()
+        island.onPlaybackAction = { [weak self] in self?.performSettingsAction($0) }
+        island.onSettings = { [weak self] in self?.openAppearanceSettings() }
+        island.apply(appearance)
         panel.lyricsView.onContextMenu = { [weak self] event, view in
             guard let self else { return }
             NSMenu.popUpContextMenu(self.menu, with: event, for: view)
         }
-        panel.orderFrontRegardless()
+        updateVisibility()
+        screenObserver = NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification,
+            object: nil, queue: .main) { [weak self] _ in self?.panel.centerAtBottom() }
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         statusItem.button?.image = NSImage(systemSymbolName: "text.bubble.fill", accessibilityDescription: "LyricGlass")
         statusItem.button?.toolTip = "LyricGlass · 桌面歌词"
@@ -82,6 +97,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        if let screenObserver { NotificationCenter.default.removeObserver(screenObserver) }
         petAudio.stop()
         pollTimer?.invalidate()
         renderTimer?.invalidate()
@@ -91,7 +107,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         panel?.centerAtBottom()
-        panel?.orderFrontRegardless()
+        island?.reposition()
+        lyricsVisible = true; updateVisibility()
         return true
     }
 
@@ -215,16 +232,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         return clock.position(at: now)
     }
+    private var canControlPlayback: Bool { !controlInFlight && (demo || (song != nil && detectedPlayer != nil)) }
 
     private func render() {
         guard panel != nil else { return }
         let pair = timeline?.pair(at: position + offset)
         let playing = demo ? demoPlaying : clock.isPlaying
+        if now > controlErrorUntil { controlError = "" }
         let info: String
         if let song {
             info = "\(demo ? "DEMO" : player.label) · \(song.artist) · \(song.title)   \(time(position)) / \(time(song.duration))   \(playing ? "播放中" : "已暂停")   \(source)   偏移 \(String(format: "%+.1fs", offset))   拖动可移动 · 右键菜单"
         } else { info = "LyricGlass · 从菜单栏打开设置，连接播放器" }
-        panel.lyricsView.show(current: pair?.current ?? message, next: pair?.next ?? secondary, detail: info)
+        panel.lyricsView.show(current: pair?.current ?? message, next: pair?.next ?? secondary,
+            detail: info + (controlError.isEmpty ? "" : " · " + controlError))
+        panel.lyricsView.updatePlayback(playing: playing, enabled: canControlPlayback)
+        island.islandView.show(current: pair?.current ?? message, next: pair?.next ?? secondary,
+            title: song?.title ?? "LyricGlass", artist: song?.artist ?? "等待播放器", playing: playing,
+            canControl: canControlPlayback, position: position, duration: song?.duration ?? 0, error: controlError)
         let audioSelected = appearance.petEnabled && appearance.petMotion == .audio
         let reducedMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         if audioSelected && petAudioArmed && playing && !demo && panel.isVisible && !reducedMotion {
@@ -247,17 +271,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return item
     }
 
-    private func makeMenu() { quickMenu.update(visible: panel.isVisible, locked: panel.ignoresMouseEvents) }
+    private func makeMenu() { quickMenu.update(visible: lyricsVisible, locked: panel.ignoresMouseEvents) }
 
-    @objc private func toggleVisible() { panel.isVisible ? panel.orderOut(nil) : panel.orderFrontRegardless() }
+    private func updateVisibility() {
+        if lyricsVisible && appearance.presentation.mode.showsDesktop { panel?.orderFrontRegardless() } else { panel?.orderOut(nil) }
+        if lyricsVisible && appearance.presentation.mode.showsIsland { island?.orderFrontRegardless() } else { island?.orderOut(nil) }
+    }
+    @objc private func toggleVisible() { lyricsVisible.toggle(); updateVisibility() }
     @objc private func toggleLock() { var value = appearance; value.clickThrough.toggle(); setAppearance(value) }
-    @objc private func recenter() { panel.centerAtBottom(); panel.orderFrontRegardless() }
+    @objc private func recenter() { panel.centerAtBottom(); island.reposition(); lyricsVisible = true; updateVisibility() }
     private func setAppearance(_ value: LyricsAppearance) {
         appearance = value.normalized()
         if !appearance.petEnabled || appearance.petMotion != .audio { petAudioArmed = false; petAudio.stop() }
         appearanceStore.save(appearance)
         panel.apply(appearance)
+        island.apply(appearance)
+        updateVisibility()
         appearanceSettings?.update(appearance)
+        render()
     }
 
     @objc private func openAppearanceSettings() {
@@ -278,7 +309,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             player: demo ? "示例歌词" : modeLabel,
             title: song?.title ?? "等待播放", artist: song?.artist ?? "在 Spotify 或 Apple Music 播放一首歌",
             status: song == nil ? secondary : "\(time(position)) / \(time(song!.duration)) · \(playing ? "播放中" : "已暂停")",
-            source: source, offset: offset, hasTrack: song != nil, demo: demo, playing: playing)
+            source: source, offset: offset, hasTrack: song != nil, demo: demo, playing: playing,
+            canControl: canControlPlayback, controlError: controlError)
         guard force || state != lastSettingsState else { return }
         lastSettingsState = state
         settings.updatePlayback(state)
@@ -286,6 +318,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func performSettingsAction(_ action: SettingsAction) {
         switch action {
+        case .previousTrack: controlPlayback(.previous)
+        case .togglePlayback: controlPlayback(.togglePlayPause)
+        case .nextTrack: controlPlayback(.next)
         case .earlier: earlier()
         case .later: later()
         case .resetOffset: resetOffset()
@@ -309,6 +344,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             if let url = Bundle.main.resourceURL?.appendingPathComponent("Fonts") { NSWorkspace.shared.open(url) }
         }
         refreshSettingsState(force: true)
+    }
+
+    private func controlPlayback(_ command: PlaybackCommand) {
+        guard canControlPlayback else { return }
+        controlError = ""
+        if demo {
+            switch command {
+            case .togglePlayPause: toggleDemoPlayback()
+            case .previous: restartDemo()
+            case .next: seekDemo()
+            }
+            render(); return
+        }
+        guard let target = detectedPlayer else { return }
+        let generation = modeGeneration
+        controlInFlight = true; render()
+        commandQueue.async { [weak self] in
+            guard let self else { return }
+            let result = Result { try self.playerController.perform(command, on: target) }
+            DispatchQueue.main.async {
+                self.controlInFlight = false
+                guard self.modeGeneration == generation, self.detectedPlayer == target, !self.demo else { self.render(); return }
+                if case .failure(let error) = result {
+                    self.controlError = error.localizedDescription; self.controlErrorUntil = self.now + 8
+                }
+                self.poll(); self.render()
+            }
+        }
     }
 
     private func makeApplicationMenu() {

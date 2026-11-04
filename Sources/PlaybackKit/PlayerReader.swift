@@ -24,7 +24,7 @@ public enum PlayerReadError: LocalizedError {
     public var errorDescription: String? {
         switch self {
         case .notRunning(let player): return "打开 \(player.label) 桌面端并播放一首歌"
-        case .denied(let player): return "请在系统设置 → 隐私与安全性 → 自动化中允许 LyricGlass 读取 \(player.label)"
+        case .denied(let player): return "请在系统设置 → 隐私与安全性 → 自动化中允许 LyricGlass 访问 \(player.label)"
         case .unavailable(let player, let code): return "\(player.label) 暂时没有响应（\(code)），请稍后重试"
         case .changedTrack: return "正在切歌…"
         case .musicMetadataUnavailable: return "请在 Apple Music 暂停后继续一次，或切换歌曲，以接收流媒体曲目信息"
@@ -32,7 +32,7 @@ public enum PlayerReadError: LocalizedError {
     }
 }
 
-// Public scripting properties only. The app never sends playback-changing events.
+// Playback observation uses public scripting properties only.
 public final class PlayerReader {
     public typealias Property = (_ code: String, _ currentTrack: Bool) throws -> NSAppleEventDescriptor
     public let player: DesktopPlayer
@@ -158,7 +158,7 @@ public final class PlayerReader {
     }
 }
 
-private final class PlayerAppleEvents {
+final class PlayerAppleEvents {
     private let target: NSAppleEventDescriptor
     init(bundleIdentifier: String) { target = NSAppleEventDescriptor(bundleIdentifier: bundleIdentifier) }
 
@@ -180,6 +180,14 @@ private final class PlayerAppleEvents {
         guard code == 0 else { throw NSError(domain: NSOSStatusErrorDomain, code: Int(code)) }
         guard let result = reply.paramDescriptor(forKeyword: keyDirectObject) else { throw NSError(domain: NSOSStatusErrorDomain, code: -1700) }
         return result
+    }
+
+    func perform(_ command: PlaybackCommand, on player: DesktopPlayer) throws {
+        let event = NSAppleEventDescriptor(eventClass: fourCC(command.eventClass(for: player)), eventID: fourCC(command.eventID),
+            targetDescriptor: target, returnID: AEReturnID(kAutoGenerateReturnID), transactionID: AETransactionID(kAnyTransactionID))
+        let reply = try event.sendEvent(options: [.waitForReply, .canInteract], timeout: 2)
+        let code = reply.paramDescriptor(forKeyword: keyErrorNumber)?.int32Value ?? 0
+        guard code == 0 else { throw NSError(domain: NSOSStatusErrorDomain, code: Int(code)) }
     }
 }
 

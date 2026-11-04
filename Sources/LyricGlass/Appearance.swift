@@ -136,6 +136,24 @@ enum FontChoice: String, Codable, CaseIterable {
     }
 }
 
+enum LyricsDisplayMode: String, Codable, CaseIterable {
+    case both, desktop, island
+    var title: String {
+        switch self { case .both: return "桌面歌词与灵动岛"; case .desktop: return "仅桌面歌词"; case .island: return "仅灵动岛" }
+    }
+    var showsDesktop: Bool { self != .island }
+    var showsIsland: Bool { self != .desktop }
+}
+
+struct LyricsPresentation: Codable, Equatable {
+    var mode: LyricsDisplayMode = .both
+    var desktopWidth = 940.0
+    var islandWidth = 480.0
+    var showNextLine = true
+    var showControls = true
+    var islandPinned = false
+}
+
 struct LyricsAppearance: Codable, Equatable {
     // Keep the old "font" storage key so existing installations retain their look.
     private var englishTypeface: FontChoice = .system
@@ -143,6 +161,11 @@ struct LyricsAppearance: Codable, Equatable {
     // Optional storage lets pre-companion appearance JSON migrate without resetting it.
     private var companionVisible: Bool? = false
     private var companionMotion: PetMotion? = .gentle
+    private var presentationOptions: LyricsPresentation?
+    var presentation: LyricsPresentation {
+        get { presentationOptions ?? LyricsPresentation() }
+        set { presentationOptions = newValue }
+    }
     var petEnabled: Bool {
         get { companionVisible ?? false }
         set { companionVisible = newValue }
@@ -163,6 +186,7 @@ struct LyricsAppearance: Codable, Equatable {
     private enum CodingKeys: String, CodingKey {
         case englishTypeface = "font", chineseTypeface = "chineseFont"
         case companionVisible, companionMotion
+        case presentationOptions
         case bold, primarySize, secondarySize, primaryColor, secondaryColor, background, backgroundColor
         case opacity, cornerRadius, lineGap, padding, glassTheme, shadow, alwaysOnTop, clickThrough
     }
@@ -231,6 +255,10 @@ final class AppearanceStore {
 extension LyricsAppearance {
     func normalized() -> LyricsAppearance {
         var value = self
+        var presentation = self.presentation
+        presentation.desktopWidth = presentation.desktopWidth.isFinite ? min(1400, max(480, presentation.desktopWidth)) : 940
+        presentation.islandWidth = presentation.islandWidth.isFinite ? min(720, max(320, presentation.islandWidth)) : 480
+        value.presentation = presentation
         value.petEnabled = petEnabled
         value.petMotion = petMotion
         // Freeze the legacy fallback before either language is edited independently.
@@ -242,7 +270,7 @@ extension LyricsAppearance {
         value.secondarySize = clamp(secondarySize, 12...48, fallback: 24)
         value.opacity = clamp(opacity, 0...1, fallback: 0.7)
         value.cornerRadius = clamp(cornerRadius, 0...36, fallback: 22)
-        value.lineGap = clamp(lineGap, 0...20, fallback: 8)
+        value.lineGap = clamp(lineGap, 0...64, fallback: 8)
         value.padding = clamp(padding, 12...48, fallback: 22)
         value.glassTheme = min(2, max(0, glassTheme))
         value.primaryColor = NSColor(hex: primaryColor)?.rgbHex ?? "FFFFFF"

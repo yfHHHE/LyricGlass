@@ -10,6 +10,7 @@ enum SettingsAction: Int, CaseIterable {
     case earlier, later, resetOffset, retryLyrics, importLRC, clearCache, reconnect, permissions
     case openSpotify, openMusic, toggleDemo, demoPlayback, restartDemo, seekDemo, openSource, openProject, openFontLicenses
     case connectPetAudio
+    case previousTrack, togglePlayback, nextTrack
 }
 
 struct SettingsPlaybackState: Equatable {
@@ -23,4 +24,6 @@ struct SettingsPlaybackState: Equatable {
     var hasTrack = false
     var demo = false
     var playing = false
+    var canControl = false
+    var controlError = ""
 }

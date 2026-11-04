@@ -31,6 +31,10 @@ final class AppearanceSettings: NSObject, NSWindowDelegate, NSTextFieldDelegate 
     private let shadow = NSSwitch()
     private let top = NSSwitch()
     private let passthrough = NSSwitch()
+    private let displayMode = NSPopUpButton()
+    private let showNextLine = NSSwitch()
+    private let showPlaybackControls = NSSwitch()
+    private let islandPinned = NSSwitch()
     private let playerMode = NSPopUpButton()
     private let trackTitle = NSTextField(labelWithString: "等待播放")
     private let trackArtist = NSTextField(labelWithString: "")
@@ -109,7 +113,7 @@ final class AppearanceSettings: NSObject, NSWindowDelegate, NSTextFieldDelegate 
     func updatePlayback(_ state: SettingsPlaybackState) {
         if playerMode.indexOfSelectedItem != state.modeIndex { playerMode.selectItem(at: state.modeIndex) }
         trackTitle.stringValue = state.title; trackArtist.stringValue = state.artist
-        playbackStatus.stringValue = "\(state.player)  ·  \(state.status)"
+        playbackStatus.stringValue = "\(state.player)  ·  \(state.status)" + (state.controlError.isEmpty ? "" : "\n" + state.controlError)
         sourceLabel.stringValue = state.source.isEmpty ? "自动匹配" : state.source
         offsetLabel.stringValue = String(format: "%+.1f s", state.offset)
         demoToggle.state = state.demo ? .on : .off
@@ -117,6 +121,10 @@ final class AppearanceSettings: NSObject, NSWindowDelegate, NSTextFieldDelegate 
         actionButtons[.importLRC]?.isEnabled = state.hasTrack
         for action in [SettingsAction.earlier, .later, .resetOffset] { actionButtons[action]?.isEnabled = state.hasTrack }
         actionButtons[.demoPlayback]?.title = state.playing ? "暂停" : "继续"
+        actionButtons[.togglePlayback]?.title = state.playing ? "暂停" : "播放"
+        for action in [SettingsAction.previousTrack, .togglePlayback, .nextTrack] {
+            actionButtons[action]?.isEnabled = state.canControl
+        }
         for action in [SettingsAction.demoPlayback, .restartDemo, .seekDemo] { actionButtons[action]?.isEnabled = state.demo }
     }
     private func label(_ text: String, size: CGFloat = 13, color: NSColor = SettingsPalette.text, bold: Bool = false) -> NSTextField {
@@ -191,7 +199,7 @@ final class AppearanceSettings: NSObject, NSWindowDelegate, NSTextFieldDelegate 
         value.action = #selector(numberChanged(_:)); value.setAccessibilityLabel(name + "数值")
         value.font = .monospacedDigitSystemFont(ofSize: 11, weight: .regular)
         value.isBordered = false; value.drawsBackground = false; value.textColor = SettingsPalette.text
-        value.widthAnchor.constraint(equalToConstant: 28).isActive = true
+        value.widthAnchor.constraint(equalToConstant: 36).isActive = true
         let formatter = NumberFormatter(); formatter.minimum = NSNumber(value: minimum); formatter.maximum = NSNumber(value: maximum); formatter.maximumFractionDigits = 0
         value.formatter = formatter
         sliders[tag] = slider; values[tag] = value
@@ -296,6 +304,15 @@ final class AppearanceSettings: NSObject, NSWindowDelegate, NSTextFieldDelegate 
         fullWidth(stack([label("预览", size: 11, color: SettingsPalette.secondary), flexibleSpace(), language]), in: preview)
         previewHeight = scene.heightAnchor.constraint(equalToConstant: 150); previewHeight.isActive = true
         fullWidth(scene, in: preview); fullWidth(preview, in: body)
+        displayMode.addItems(withTitles: LyricsDisplayMode.allCases.map(\.title))
+        displayMode.target = self; displayMode.action = #selector(presentationChanged(_:))
+        displayMode.setAccessibilityLabel("歌词显示方式"); SettingsNativeControls.button(displayMode)
+        displayMode.widthAnchor.constraint(equalToConstant: 210).isActive = true
+        for (control, name) in [(showNextLine, "显示下一句歌词"), (showPlaybackControls, "显示播放按钮"), (islandPinned, "灵动岛保持展开")] {
+            control.target = self; control.action = #selector(presentationChanged(_:)); control.setAccessibilityLabel(name)
+        }
+        showPlaybackControls.toolTip = "桌面按钮在鼠标悬停时显示；顶部按钮在灵动岛展开时显示"
+        fullWidth(section("显示方式", rows: [row("显示位置", displayMode), row("显示下一句", showNextLine), row("显示播放按钮", showPlaybackControls)]), in: body)
         reloadFontMenu()
         let refresh = NSButton(title: "刷新字体", target: self, action: #selector(refreshFonts))
         SettingsNativeControls.button(refresh)
@@ -322,13 +339,15 @@ final class AppearanceSettings: NSObject, NSWindowDelegate, NSTextFieldDelegate 
             row("中文字体", chineseFont), row("英文字体", englishFont),
             slider("当前句字号", tag: 0, minimum: 16, maximum: 64),
             slider("下一句字号", tag: 1, minimum: 12, maximum: 48),
+            slider("两句歌词间距", tag: 5, minimum: 0, maximum: 64),
             row("颜色", stack([colorTile("当前句", tag: 0), colorTile("下一句", tag: 1), colorTile("背景", tag: 2)], spacing: 18), height: 68)
         ]), in: body)
         glassHint.font = .systemFont(ofSize: 12); glassHint.textColor = SettingsPalette.muted
         fullWidth(section("背景", rows: [row("预设", presets), row("背景样式", background), row("毛玻璃外观", stack([theme, glassHint])), slider("不透明度", tag: 2, minimum: 0, maximum: 100)]), in: body)
         let restore = NSButton(title: "恢复主屏位置", target: self, action: #selector(restoreDesktop)); SettingsNativeControls.button(restore)
         passthrough.toolTip = "开启后仍可从菜单栏进入设置解除"
-        fullWidth(section("窗口", rows: [row("始终置顶", top), row("鼠标穿透", passthrough), row("窗口位置", restore)]), in: body)
+        fullWidth(section("桌面窗口", rows: [slider("桌面歌词宽度", tag: 6, minimum: 480, maximum: 1400), row("始终置顶", top), row("鼠标穿透", passthrough), row("窗口位置", restore)]), in: body)
+        fullWidth(section("顶部灵动岛", rows: [row("保持展开", islandPinned), slider("展开宽度", tag: 7, minimum: 320, maximum: 720)]), in: body)
         advancedButton.setButtonType(.onOff); advancedButton.isBordered = false; advancedButton.alignment = .left
         advancedButton.font = .systemFont(ofSize: 12); advancedButton.contentTintColor = SettingsPalette.secondary
         advancedButton.image = NSImage(systemSymbolName: "chevron.right", accessibilityDescription: nil)
@@ -337,7 +356,7 @@ final class AppearanceSettings: NSObject, NSWindowDelegate, NSTextFieldDelegate 
         fullWidth(advancedButton, in: body)
         let fontBook = NSButton(title: "管理本机字体…", target: self, action: #selector(openFontBook)); SettingsNativeControls.button(fontBook)
         advanced = section("", rows: [row("当前句加粗", bold), row("文字阴影", shadow),
-            slider("两行间距", tag: 5, minimum: 0, maximum: 20), slider("圆角", tag: 3, minimum: 0, maximum: 36), slider("左右留白", tag: 4, minimum: 12, maximum: 48),
+            slider("圆角", tag: 3, minimum: 0, maximum: 36), slider("左右留白", tag: 4, minimum: 12, maximum: 48),
             row("当前句 HEX", hexFields[0]!), row("下一句 HEX", hexFields[1]!), row("背景 HEX", hexFields[2]!), row("本机字体", stack([fontBook, refresh]))])
         fullWidth(advanced, in: body); advanced.isHidden = true
         fontNote.font = .systemFont(ofSize: 11); fontNote.textColor = SettingsPalette.secondary; fontNote.maximumNumberOfLines = 3
@@ -388,6 +407,7 @@ final class AppearanceSettings: NSObject, NSWindowDelegate, NSTextFieldDelegate 
         let track = stack([trackTitle, trackArtist, playbackStatus], vertical: true, spacing: 6)
         track.edgeInsets = NSEdgeInsets(top: 14, left: 12, bottom: 14, right: 12)
         fullWidth(section("正在播放", rows: [track]), in: body)
+        fullWidth(section("播放控制", rows: [row("控制当前播放器", stack([action("上一首", .previousTrack), action("播放", .togglePlayback), action("下一首", .nextTrack)]))]), in: body)
         playerMode.addItems(withTitles: ["自动识别", "Spotify", "Apple Music"]); playerMode.target = self; playerMode.action = #selector(playerChanged(_:)); SettingsNativeControls.button(playerMode)
         playerMode.widthAnchor.constraint(equalToConstant: 180).isActive = true
         fullWidth(section("播放器", rows: [row("跟随播放器", playerMode), row("打开播放器", stack([action("Spotify", .openSpotify), action("Apple Music", .openMusic)]))]), in: body)
@@ -452,6 +472,11 @@ final class AppearanceSettings: NSObject, NSWindowDelegate, NSTextFieldDelegate 
         picker.toolTip = choice.label
     }
     private func syncControls() {
+        displayMode.selectItem(at: LyricsDisplayMode.allCases.firstIndex(of: style.presentation.mode) ?? 0)
+        showNextLine.state = style.presentation.showNextLine ? .on : .off
+        showPlaybackControls.state = style.presentation.showControls ? .on : .off
+        islandPinned.state = style.presentation.islandPinned ? .on : .off
+        islandPinned.isEnabled = style.presentation.mode.showsIsland
         petToggle.state = style.petEnabled ? .on : .off
         petMotion.selectItem(at: PetMotion.allCases.firstIndex(of: style.petMotion) ?? 1)
         petMotion.isEnabled = style.petEnabled
@@ -467,8 +492,11 @@ final class AppearanceSettings: NSObject, NSWindowDelegate, NSTextFieldDelegate 
         syncFont(englishFont, choice: style.englishFont, width: englishFontWidth)
         background.selectedSegment = BackgroundMode.allCases.firstIndex(of: style.background)!
         theme.selectItem(at: style.glassTheme)
-        let numbers = [style.primarySize, style.secondarySize, style.opacity * 100, style.cornerRadius, style.padding, style.lineGap]
+        let numbers = [style.primarySize, style.secondarySize, style.opacity * 100, style.cornerRadius, style.padding, style.lineGap, style.presentation.desktopWidth, style.presentation.islandWidth]
         for (tag, number) in numbers.enumerated() { sliders[tag]?.doubleValue = number; values[tag]?.doubleValue = number }
+        sliders[5]?.isEnabled = style.presentation.showNextLine; values[5]?.isEnabled = style.presentation.showNextLine
+        sliders[6]?.isEnabled = style.presentation.mode.showsDesktop; values[6]?.isEnabled = style.presentation.mode.showsDesktop
+        sliders[7]?.isEnabled = style.presentation.mode.showsIsland; values[7]?.isEnabled = style.presentation.mode.showsIsland
         for (tag, hex) in [style.primaryColor, style.secondaryColor, style.backgroundColor].enumerated() {
             wells[tag]?.color = NSColor(hex: hex) ?? .white; hexFields[tag]?.stringValue = "#" + hex
         }
@@ -485,7 +513,8 @@ final class AppearanceSettings: NSObject, NSWindowDelegate, NSTextFieldDelegate 
     private func apply(save: Bool = true) {
         var visualStyle = style
         visualStyle.petEnabled = false; visualStyle.petMotion = .gentle
-        presets.selectedSegment = (0...2).first { LyricsAppearance.preset($0) == visualStyle } ?? -1
+        visualStyle.presentation = LyricsPresentation()
+        presets.selectedSegment = (0...2).first { LyricsAppearance.preset($0).normalized() == visualStyle.normalized() } ?? -1
         scene.lyrics.apply(style)
         previewHeight.constant = scene.lyrics.preferredPreviewHeight
         if save { onChange(style); saved.stringValue = "已自动保存" }
@@ -517,6 +546,8 @@ final class AppearanceSettings: NSObject, NSWindowDelegate, NSTextFieldDelegate 
         case 3: style.cornerRadius = number
         case 4: style.padding = number
         case 5: style.lineGap = number
+        case 6: style.presentation.desktopWidth = number
+        case 7: style.presentation.islandWidth = number
         default: return
         }
         apply()
@@ -555,13 +586,21 @@ final class AppearanceSettings: NSObject, NSWindowDelegate, NSTextFieldDelegate 
         style.alwaysOnTop = top.state == .on; style.clickThrough = passthrough.state == .on
         apply()
     }
+    @objc private func presentationChanged(_ sender: NSControl) {
+        guard LyricsDisplayMode.allCases.indices.contains(displayMode.indexOfSelectedItem) else { return }
+        style.presentation.mode = LyricsDisplayMode.allCases[displayMode.indexOfSelectedItem]
+        style.presentation.showNextLine = showNextLine.state == .on
+        style.presentation.showControls = showPlaybackControls.state == .on
+        style.presentation.islandPinned = islandPinned.state == .on
+        syncControls(); apply()
+    }
     @objc private func languageChanged(_ sender: NSSegmentedControl) {
         scene.setLanguage(sender.selectedSegment)
     }
     @objc private func presetChanged(_ sender: NSSegmentedControl) {
         guard (0...2).contains(sender.selectedSegment) else { return }
-        let enabled = style.petEnabled, motion = style.petMotion
-        style = .preset(sender.selectedSegment); style.petEnabled = enabled; style.petMotion = motion
+        let enabled = style.petEnabled, motion = style.petMotion, presentation = style.presentation
+        style = .preset(sender.selectedSegment); style.petEnabled = enabled; style.petMotion = motion; style.presentation = presentation
         syncControls(); apply()
     }
     @objc private func resetDefaults() { style = LyricsAppearance(); syncControls(); apply() }

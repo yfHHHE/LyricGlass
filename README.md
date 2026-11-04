@@ -2,7 +2,7 @@
 
 <img src="Resources/AppIcon.png" width="96" alt="LyricGlass 图标">
 
-Spotify 和 Apple Music 的 macOS 透明双行桌面歌词。当前一句高亮，下一句预览，放在桌面底部，工作时也能看到歌词。
+Spotify 和 Apple Music 的 macOS 桌面歌词与顶部灵动岛。当前一句高亮、下一句预览，可从两种显示位置直接控制播放器。
 
 **[下载最新测试版](https://github.com/yfHHHE/LyricGlass/releases)** · [首次运行说明](docs/首次运行.txt)
 
@@ -20,6 +20,10 @@ Spotify 和 Apple Music 的 macOS 透明双行桌面歌词。当前一句高亮�
 
 ## 功能与操作
 
+- 顶部居中的灵动岛：悬停或点击展开歌词和播放控制，离开后收起；可设置保持展开，适配刘海与无刘海屏幕
+- 「外观 → 显示方式」可选桌面歌词与灵动岛、仅桌面歌词、仅灵动岛
+- 上一首、播放/暂停、下一首：位于展开的灵动岛、鼠标悬停的桌面歌词和「播放与歌词」设置页，只控制当前跟随的播放器
+- 两句歌词间距 0–64pt、桌面宽度 480–1400pt、灵动岛展开宽度 320–720pt；可隐藏下一句和播放按钮，自动保存
 - 跟随所选 Spotify / Apple Music 的歌曲、暂停、继续、切歌与进度跳转
 - 默认自动识别正在播放的 Spotify / Apple Music；另一方新开始播放时自动切换，双方暂停时保留当前歌词
 - 设置可选择“自动识别 / Spotify / Apple Music”并记住模式，显示实际跟随的播放器

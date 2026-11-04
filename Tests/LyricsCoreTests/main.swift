@@ -170,7 +170,11 @@ let cases: [(String, () -> Void)] = [
     ("Automatic handoffs follow new playback and keep stable ties", checkAutomaticPlayerTransitionsStayStable),
     ("Automatic mode isolates denied and unresponsive players", checkAutomaticPermissionsAndRecovery),
     ("Manual mode pins a player and can return to automatic", checkManualModeOverridesAutomaticChoice),
-    ("Automatic mode handles closed apps and missing stream metadata", checkAutomaticEmptyAndStreamingGap)
+    ("Automatic mode handles closed apps and missing stream metadata", checkAutomaticEmptyAndStreamingGap),
+    ("Playback commands use each player's shipped scripting dictionary", checkPlaybackCommandDictionaries),
+    ("Playback commands target only the selected player", checkPlaybackCommandsTargetOnlySelectedPlayer),
+    ("Playback controls never launch a closed player", checkPlaybackControlsDoNotLaunchClosedPlayer),
+    ("Control errors never retry or switch players", checkPlaybackControlErrorsDoNotRetryOrSwitchPlayers)
 ]
 for (name, run) in cases {
     let before = failures

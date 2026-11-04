@@ -32,6 +32,60 @@ func verify() throws {
     let disclosure = descendants(settings.root).compactMap { $0 as? NSButton }.first { $0.title == "更多外观选项" }!
     disclosure.state = .on; try send(disclosure)
     let views = descendants(settings.root)
+    let display = views.compactMap { $0 as? NSPopUpButton }.first { $0.accessibilityLabel() == "歌词显示方式" }!
+    try require(store.load().presentation.mode == .both, "Default must retain desktop lyrics alongside the island")
+    display.selectItem(at: 2); try send(display)
+    try require(store.load().presentation.mode == .island, "Display mode must save independently of typography")
+    display.selectItem(at: 0); try send(display)
+    let gap = views.compactMap { $0 as? NSSlider }.first { $0.tag == 5 }!
+    gap.doubleValue = 48; try send(gap)
+    panel.lyricsView.layoutSubtreeIfNeeded()
+    try require(abs(panel.lyricsView.current.frame.minY - panel.lyricsView.next.frame.maxY - 48) < 0.1, "Line gap must reach the real renderer without clipping")
+    let width = views.compactMap { $0 as? NSSlider }.first { $0.tag == 6 }!
+    width.doubleValue = 680; try send(width)
+    try require(abs(panel.frame.width - min(680, (NSScreen.screens.first?.visibleFrame.width ?? 720) - 40)) < 0.1, "Desktop width must resize the actual window")
+    let showNext = views.compactMap { $0 as? NSSwitch }.first { $0.accessibilityLabel() == "显示下一句歌词" }!
+    let twoLineHeight = panel.frame.height
+    showNext.state = .off; try send(showNext)
+    try require(panel.lyricsView.next.isHidden && panel.frame.height < twoLineHeight, "Single-line mode must hide the next line and reclaim its space")
+    showNext.state = .on; try send(showNext)
+    gap.doubleValue = 8; try send(gap)
+    let island = IslandPanel()
+    island.apply(store.load())
+    var pinned = store.load(); pinned.presentation.islandPinned = true
+    island.apply(pinned)
+    try require(island.expanded, "Pinning must immediately expand the island")
+    pinned.presentation.islandPinned = false; island.apply(pinned)
+    try require(!island.expanded, "Unpinning from settings must immediately restore compact mode")
+    island.setExpanded(true, animated: false)
+    island.islandView.layoutSubtreeIfNeeded()
+    try require(island.frame.maxY == NSScreen.screens.first?.frame.maxY, "Island expansion must keep the top screen edge anchored")
+    let notched = IslandGeometry(screenFrame: NSRect(x: -1440, y: 200, width: 1440, height: 900), topInset: 32, notchWidth: 200)
+    let compactFrame = notched.frame(expanded: false, width: 480, height: 180)
+    let expandedFrame = notched.frame(expanded: true, width: 480, height: 180)
+    try require(compactFrame.midX == expandedFrame.midX && compactFrame.maxY == expandedFrame.maxY && expandedFrame.maxY == 1100, "Notched and offset monitors must share a stable expansion anchor")
+    island.islandView.geometry = notched
+    island.setFrame(NSRect(x: 0, y: 0, width: 480, height: island.islandView.expandedHeight), display: true)
+    island.islandView.layoutSubtreeIfNeeded()
+    try require(island.islandView.current.frame.maxY <= island.islandView.bounds.height - 32, "Expanded lyrics must stay below the camera cutout")
+    let small = IslandGeometry(screenFrame: NSRect(x: 100, y: -600, width: 360, height: 600))
+    try require(small.screenFrame.contains(small.frame(expanded: true, width: 720, height: 200)), "Island must clamp to small and secondary screen coordinates")
+    var invalidLayout = LyricsAppearance(); invalidLayout.lineGap = .infinity
+    invalidLayout.presentation.desktopWidth = .nan; invalidLayout.presentation.islandWidth = .infinity
+    let valid = invalidLayout.normalized()
+    try require(valid.lineGap == 8 && valid.presentation.desktopWidth == 940 && valid.presentation.islandWidth == 480, "Invalid stored dimensions must normalize before any window layout")
+    var playbackActions: [SettingsAction] = []
+    panel.lyricsView.onPlaybackAction = { playbackActions.append($0) }
+    island.onPlaybackAction = { playbackActions.append($0) }
+    panel.lyricsView.updatePlayback(playing: true, enabled: true)
+    island.islandView.controls.update(playing: true, enabled: true)
+    try require(panel.lyricsView.controls.playPause.toolTip == "暂停", "Playback state must set the current transport action")
+    for controls in [panel.lyricsView.controls, island.islandView.controls] {
+        for button in [controls.previous, controls.playPause, controls.next] { try send(button) }
+    }
+    try require(playbackActions == [.previousTrack, .togglePlayback, .nextTrack, .previousTrack, .togglePlayback, .nextTrack], "Both windows must route all three real native buttons")
+    panel.lyricsView.updatePlayback(playing: false, enabled: false)
+    try require(!panel.lyricsView.controls.next.isEnabled && panel.lyricsView.controls.playPause.toolTip == "播放", "Unavailable playback must disable controls")
     let petToggle = views.compactMap { $0 as? NSSwitch }.first { $0.accessibilityLabel() == "在歌词旁显示雨滴" }!
     let petMotion = views.compactMap { $0 as? NSPopUpButton }.first { $0.accessibilityLabel() == "雨滴动作" }!
     try require(!store.load().petEnabled && panel.lyricsView.pet.avatar == nil, "Companion must default off without loading graphics")
@@ -218,7 +272,25 @@ if CommandLine.arguments.count == 4 && CommandLine.arguments[1] == "--verify-sto
 } else {
     _ = NSApplication.shared
     do {
-        if let index = CommandLine.arguments.firstIndex(of: "--snapshot"), index + 1 < CommandLine.arguments.count {
+        if let index = CommandLine.arguments.firstIndex(of: "--island-snapshot"), index + 1 < CommandLine.arguments.count {
+            try registerAppearanceFonts()
+            let island = IslandPanel()
+            var style = LyricsAppearance(); style.chineseFont = .wenkai; style.englishFont = .inter
+            style.presentation.islandPinned = true
+            island.apply(style)
+            if CommandLine.arguments.contains("--notch") {
+                island.islandView.geometry = IslandGeometry(screenFrame: NSRect(x: 0, y: 0, width: 1440, height: 900), topInset: 32, notchWidth: 200)
+                island.setFrame(NSRect(x: 0, y: 0, width: 480, height: island.islandView.expandedHeight), display: true)
+            }
+            island.islandView.show(current: "让旋律 stay with me", next: "让时间慢一点 · Stay awhile", title: "窗边的旋律", artist: "LyricGlass 原创演示", playing: true, canControl: true, position: 15, duration: 40, error: "")
+            let view = island.islandView
+            view.layoutSubtreeIfNeeded()
+            guard let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { throw CheckError(description: "Cannot render island") }
+            view.cacheDisplay(in: view.bounds, to: bitmap)
+            guard let png = bitmap.representation(using: .png, properties: [:]) else { throw CheckError(description: "Cannot encode island") }
+            try png.write(to: URL(fileURLWithPath: CommandLine.arguments[index + 1]))
+            print("PASS island preview exported: \(view.bounds)")
+        } else if let index = CommandLine.arguments.firstIndex(of: "--snapshot"), index + 1 < CommandLine.arguments.count {
             try registerAppearanceFonts()
             let lightCard = CommandLine.arguments.contains("--light-card")
             var style = LyricsAppearance.preset(lightCard ? 2 : 1)
