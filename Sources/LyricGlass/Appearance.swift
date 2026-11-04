@@ -262,7 +262,8 @@ func registerAppearanceFonts() throws {
         guard CTFontManagerRegisterFontsForURL(url as CFURL, .process, &error) else {
             let detail = error?.takeRetainedValue()
             if (detail as Error?)?._code == CTFontManagerError.alreadyRegistered.rawValue { continue }
-            throw detail ?? NSError(domain: "LyricGlass.Fonts", code: 2) as CFError
+            if let detail { throw detail }
+            throw NSError(domain: "LyricGlass.Fonts", code: 2)
         }
     }
 }
