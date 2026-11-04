@@ -1,11 +1,11 @@
 import AppKit
 
 enum LyricsTypography {
-    static func attributedText(_ text: String, style: LyricsAppearance, size: CGFloat, bold: Bool, color: NSColor) -> NSAttributedString {
+    static func attributedText(_ text: String, style: LyricsAppearance, size: CGFloat, bold: Bool, color: NSColor, alignment: NSTextAlignment = .center) -> NSAttributedString {
         let english = style.englishFont.font(size: size, bold: bold)
         let chinese = style.chineseFont.font(size: size, bold: bold)
         let paragraph = NSMutableParagraphStyle()
-        paragraph.alignment = .center
+        paragraph.alignment = alignment
         paragraph.lineBreakMode = .byWordWrapping
         let result = NSMutableAttributedString(string: text, attributes: [.font: english, .foregroundColor: color, .paragraphStyle: paragraph])
         var offset = 0

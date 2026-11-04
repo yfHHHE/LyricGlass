@@ -1,5 +1,28 @@
 import AppKit
 
+enum PreviewLyrics {
+    static let english = [
+        "Every time I lost my mind",
+        "Every time 我告訴我自己",
+        "I will be okay"
+    ]
+    static let chinese = [
+        "人群的溫暖輕撫我讓寂寞更熱烈",
+        "無知的黑洞撐開虛空快把我撕裂"
+    ]
+    static func pair(language: Int) -> (current: String, next: String) {
+        switch language {
+        case 1: return (chinese[0], chinese[1])
+        case 2: return (english[0], english[2])
+        default: return (english[0], english[1])
+        }
+    }
+    static var lrc: String {
+        zip(["00:00.00", "00:08.00", "00:16.00", "00:24.00", "00:32.00"], english + chinese)
+            .map { "[\($0.0)]\($0.1)" }.joined(separator: "\n") + "\n[00:39.00]"
+    }
+}
+
 final class WallpaperView: NSView {
     override func draw(_ dirtyRect: NSRect) {
         NSGradient(colors: [NSColor(hex: "59414F")!, NSColor(hex: "30232D")!])!.draw(in: bounds, angle: 24)
@@ -27,8 +50,8 @@ final class PreviewScene: NSView {
     }
     required init?(coder: NSCoder) { fatalError() }
     func setLanguage(_ index: Int) {
-        lyrics.show(current: index == 0 ? "让旋律 stay with me" : index == 1 ? "让旋律停在窗边" : "Let the melody stay",
-                    next: index == 0 ? "让时间慢一点 · Stay awhile" : index == 1 ? "让文字跟着时间" : "The words follow time", detail: "")
+        let pair = PreviewLyrics.pair(language: index)
+        lyrics.show(current: pair.current, next: pair.next, detail: "")
     }
     override func layout() {
         super.layout()

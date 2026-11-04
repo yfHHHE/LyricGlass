@@ -6,6 +6,11 @@ public struct LyricLine: Equatable, Sendable {
     public init(time: Double, text: String) { self.time = time; self.text = text }
 }
 
+public struct LyricsContext: Equatable, Sendable {
+    public let lines: [String]
+    public let currentIndex: Int
+}
+
 public struct LyricsTimeline: Sendable {
     public let lines: [LyricLine]
 
@@ -67,6 +72,25 @@ public struct LyricsTimeline: Sendable {
         let current = lines[i].text.isEmpty ? "间奏 ♪" : lines[i].text
         let next = lines.dropFirst(i + 1).first(where: { !$0.text.isEmpty })?.text ?? ""
         return (current, next)
+    }
+
+    /// A reading window around the same timestamp used by the two-line display.
+    /// Shift at the start/end of a song to keep as much context as is available.
+    public func context(at position: Double, count: Int = 5) -> LyricsContext {
+        let count = max(1, min(20, count))
+        guard !lines.isEmpty else { return LyricsContext(lines: ["暂无同步歌词"], currentIndex: 0) }
+        guard let active = index(at: position) else {
+            return LyricsContext(lines: ["前奏 · 等待人声"] + lines.lazy.filter { !$0.text.isEmpty }.prefix(count - 1).map(\.text), currentIndex: 0)
+        }
+        // Empty timestamps mark musical interludes. Keep the active one, but do
+        // not spend the surrounding reading rows on blank timestamps.
+        let indices = lines.indices.filter { $0 == active || !lines[$0].text.isEmpty }
+        let current = indices.firstIndex(of: active)!
+        let start = max(0, min(current - count / 2, indices.count - count))
+        let window = indices.dropFirst(start).prefix(count).map {
+            lines[$0].text.isEmpty ? "间奏 ♪" : lines[$0].text
+        }
+        return LyricsContext(lines: window, currentIndex: current - start)
     }
 }
 

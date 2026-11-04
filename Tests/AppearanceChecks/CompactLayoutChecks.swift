@@ -72,7 +72,9 @@ func verifyCompactLayouts() throws {
     try require(saved.compactWidth == 640 && saved.compactHeight == 20 && saved.expandedMaxHeight == 180 && saved.topOffset == 24 && saved.shape == .rectangle, "Every new native control must save its own value")
     try require(store.load().presentation.islandWidth >= saved.compactWidth, "Expanded island must not shrink away from a pointer on the wider compact window")
     island.islandView.layoutSubtreeIfNeeded()
-    try require(island.islandView.layer?.cornerRadius == 0, "Rectangle must have square corners in the actual view")
+    try require(island.islandView.layer?.cornerRadius == 10, "The collapsed window must remain a capsule regardless of expanded shape")
+    island.setExpanded(true, animated: false); island.islandView.layoutSubtreeIfNeeded()
+    try require(island.islandView.layer?.cornerRadius == 0, "The selected rectangle shape must apply when expanded")
     let screen = IslandGeometry(screenFrame: NSRect(x: -1000, y: 100, width: 1000, height: 700))
     var shifted = screen; shifted.topOffset = 24
     let compact = shifted.frame(expanded: false, width: 480, height: 300, compactWidth: 640, compactHeight: 20)
@@ -86,7 +88,7 @@ func verifyCompactLayouts() throws {
     legacy["presentationOptions"] = presentation
     let migrated = try JSONDecoder().decode(LyricsAppearance.self, from: JSONSerialization.data(withJSONObject: legacy)).normalized()
     try require(migrated.presentation.desktopWidth == 731 && migrated.chineseFont == .notoSerif && migrated.englishFont == .openDyslexic && migrated.lineGap == 0, "Existing v0.6.1 settings must survive the new nested options")
-    try require(migrated.presentation.islandAppearance.compactWidth == 420 && migrated.presentation.islandAppearance.compactHeight == 24, "Existing users receive wider, lower compact defaults")
+    try require(migrated.presentation.islandAppearance.compactWidth == 420 && migrated.presentation.islandAppearance.compactHeight == 24 && migrated.presentation.islandAppearance.expandedLineCount == 2, "Existing users without island options must retain the original capsule and two-line expansion")
     print("PASS compact layouts: visual zero-gap \(gap)pt, desktop \(compactHeight)pt, independent dimensions, shapes, toolbar lifecycle and settings migration")
 }
 

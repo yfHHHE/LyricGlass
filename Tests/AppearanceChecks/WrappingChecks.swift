@@ -65,6 +65,7 @@ func verifyWrapping() throws {
     panel.lyricsView.layoutSubtreeIfNeeded()
     try require(panel.frame.height < narrowHeight, "Switching back to short lyrics must reclaim height")
 
+    style.presentation.islandAppearance.expandedLineCount = 5
     let island = IslandPanel(); island.apply(style); island.setExpanded(true, animated: false)
     let top = island.frame.maxY, initialHeight = island.frame.height
     island.islandView.show(current: longLyric, next: longLyric, title: "测试", artist: "LyricGlass", playing: true, canControl: true, position: 10, duration: 100, error: "")
@@ -72,7 +73,7 @@ func verifyWrapping() throws {
     try require(island.frame.height > initialHeight && island.frame.maxY == top, "New long lyrics must grow an expanded island downwards from its top anchor")
     try requireCompleteGlyphLayout(island.islandView.current)
     try requireCompleteGlyphLayout(island.islandView.next)
-    try require(island.islandView.textViewport.frame.minY > island.islandView.controls.frame.maxY, "Wrapped text must not cover transport controls")
+    try require(island.islandView.textViewport.frame.maxX < island.islandView.controls.frame.minX, "Wrapped text must not cover the right-side transport controls")
     let notched = IslandGeometry(screenFrame: NSRect(x: -900, y: 100, width: 900, height: 700), topInset: 32, notchWidth: 200)
     island.islandView.geometry = notched
     island.setFrame(notched.frame(expanded: true, width: 320, height: island.islandView.expandedHeight), display: true)

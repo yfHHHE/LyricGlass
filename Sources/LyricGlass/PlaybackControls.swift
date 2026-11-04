@@ -5,6 +5,9 @@ final class PlaybackControls: NSView {
     let playPause = NSButton()
     let next = NSButton()
     var onAction: ((SettingsAction) -> Void)?
+    var orientation: NSUserInterfaceLayoutOrientation = .horizontal {
+        didSet { needsLayout = true }
+    }
     private var dark = false
 
     init(dark: Bool = false) {
@@ -28,6 +31,15 @@ final class PlaybackControls: NSView {
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
     override func layout() {
         super.layout()
+        if orientation == .vertical {
+            let size = min(32, bounds.width, bounds.height / 3)
+            let spacing = max(0, (bounds.height - size * 3) / 2)
+            for (index, button) in [previous, playPause, next].enumerated() {
+                button.frame = NSRect(x: (bounds.width - size) / 2,
+                    y: bounds.height - size - CGFloat(index) * (size + spacing), width: size, height: size)
+            }
+            return
+        }
         let size = min(36, bounds.height)
         let spacing: CGFloat = 12
         let width = size * 3 + spacing * 2

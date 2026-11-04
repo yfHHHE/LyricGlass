@@ -68,6 +68,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         island = IslandPanel()
         island.onPlaybackAction = { [weak self] in self?.performSettingsAction($0) }
         island.onSettings = { [weak self] in self?.openAppearanceSettings() }
+        island.onAppearanceChange = { [weak self] in self?.setAppearance($0) }
         island.apply(appearance)
         panel.lyricsView.onContextMenu = { [weak self] event, view in
             guard let self else { return }
@@ -236,7 +237,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func render() {
         guard panel != nil else { return }
-        let pair = timeline?.pair(at: position + offset)
+        let playbackPosition = position
+        let lyricPosition = playbackPosition + offset
+        let pair = timeline?.pair(at: lyricPosition)
+        let context = timeline?.context(at: lyricPosition)
         let playing = demo ? demoPlaying : clock.isPlaying
         if now > controlErrorUntil { controlError = "" }
         let info: String
@@ -248,7 +252,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         panel.lyricsView.updatePlayback(playing: playing, enabled: canControlPlayback)
         island.islandView.show(current: pair?.current ?? message, next: pair?.next ?? secondary,
             title: song?.title ?? "LyricGlass", artist: song?.artist ?? "等待播放器", playing: playing,
-            canControl: canControlPlayback, position: position, duration: song?.duration ?? 0, error: controlError)
+            canControl: canControlPlayback, position: playbackPosition, duration: song?.duration ?? 0, error: controlError,
+            context: context?.lines ?? [], currentIndex: context?.currentIndex ?? 0)
         let audioSelected = appearance.petEnabled && appearance.petMotion == .audio
         let reducedMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         if audioSelected && petAudioArmed && playing && !demo && panel.isVisible && !reducedMotion {
@@ -478,19 +483,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func startDemo() {
         modeGeneration += 1; lookupGeneration += 1; lyricsTask?.cancel()
         demo = true; demoPlaying = true; demoPosition = 0; demoSampledAt = now; offset = 0
-        song = Song(id: "demo", title: "窗边的旋律", artist: "LyricGlass 原创演示", album: "本地演示", duration: 40)
-        timeline = LyricsTimeline(lrc: """
-        [00:00.00]让旋律停在窗边
-        [00:05.00]让文字跟着时间
-        [00:10.00]切换页面，音乐继续
-        [00:15.00]这一句，刚好被看见
-        [00:20.00]
-        [00:25.00]暂停，也等你回来
-        [00:30.00]下一段，轻轻展开
-        [00:35.00]桌面上的两行诗
-        [00:39.00]
-        """)
-        source = "自写歌词 · 演示"
+        song = Song(id: "demo", title: "歌词示例", artist: "演示", album: "本地示例", duration: 40)
+        timeline = LyricsTimeline(lrc: PreviewLyrics.lrc)
+        source = "示例歌词 · 演示"
         selectedSource = nil
     }
     @objc private func toggleDemo() {

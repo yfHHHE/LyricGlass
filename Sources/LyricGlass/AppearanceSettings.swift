@@ -35,6 +35,7 @@ final class AppearanceSettings: NSObject, NSWindowDelegate, NSTextFieldDelegate 
     private let showNextLine = NSSwitch()
     private let showPlaybackControls = NSSwitch()
     private let islandPinned = NSSwitch()
+    private let islandLines = NSSegmentedControl(labels: ["两行", "五行"], trackingMode: .selectOne, target: nil, action: nil)
     private let islandShape = NSPopUpButton()
     private let playerMode = NSPopUpButton()
     private let trackTitle = NSTextField(labelWithString: "等待播放")
@@ -317,7 +318,8 @@ final class AppearanceSettings: NSObject, NSWindowDelegate, NSTextFieldDelegate 
         for (control, name) in [(showNextLine, "显示下一句歌词"), (showPlaybackControls, "显示播放按钮"), (islandPinned, "灵动岛保持展开")] {
             control.target = self; control.action = #selector(presentationChanged(_:)); control.setAccessibilityLabel(name)
         }
-        showPlaybackControls.toolTip = "桌面按钮在鼠标悬停时显示；顶部按钮在灵动岛展开时显示"
+        showPlaybackControls.toolTip = "桌面按钮在悬停时显示；顶部展开为两行时位于标题栏，五行时位于右侧"
+        showNextLine.toolTip = "影响桌面歌词与顶部展开的两行布局；五行模式显示完整上下文"
         fullWidth(section("显示方式", rows: [row("显示位置", displayMode), row("显示下一句", showNextLine), row("显示播放按钮", showPlaybackControls)]), in: body)
         reloadFontMenu()
         let refresh = NSButton(title: "刷新字体", target: self, action: #selector(refreshFonts))
@@ -357,16 +359,20 @@ final class AppearanceSettings: NSObject, NSWindowDelegate, NSTextFieldDelegate 
         islandShape.target = self; islandShape.action = #selector(presentationChanged(_:))
         islandShape.alignment = .right
         islandShape.setAccessibilityLabel("顶部窗口形状"); SettingsNativeControls.button(islandShape)
+        islandLines.target = self; islandLines.action = #selector(presentationChanged(_:))
+        islandLines.setAccessibilityLabel("顶部展开行数"); SettingsNativeControls.segments(islandLines)
+        islandLines.widthAnchor.constraint(equalToConstant: 140).isActive = true
         fullWidth(section("顶部灵动岛", rows: [
-            row("形状", islandShape),
-            slider("收起宽度", tag: 8, minimum: 180, maximum: 1000),
-            slider("收起高度", tag: 9, minimum: 18, maximum: 64),
+            row("展开行数", islandLines),
+            row("展开形状", islandShape),
+            slider("胶囊宽度", tag: 8, minimum: 180, maximum: 1000),
+            slider("胶囊高度", tag: 9, minimum: 18, maximum: 64),
             slider("距屏幕顶部", tag: 11, minimum: 0, maximum: 80),
-            row("保持展开", islandPinned),
+            row("锁定展开", islandPinned),
             slider("展开宽度", tag: 7, minimum: 320, maximum: 1000),
             slider("展开最大高度", tag: 10, minimum: 160, maximum: 720)
         ]), in: body)
-        fullWidth(label("展开宽度不小于收起宽度；刘海屏自动避开摄像头", size: 11, color: SettingsPalette.muted), in: body)
+        fullWidth(label("收起为单行小胶囊；展开可选两行或五行，未锁定时移开鼠标自动收起", size: 11, color: SettingsPalette.muted), in: body)
         advancedButton.setButtonType(.onOff); advancedButton.isBordered = false; advancedButton.alignment = .left
         advancedButton.font = .systemFont(ofSize: 12); advancedButton.contentTintColor = SettingsPalette.secondary
         advancedButton.image = NSImage(systemSymbolName: "chevron.right", accessibilityDescription: nil)
@@ -496,6 +502,8 @@ final class AppearanceSettings: NSObject, NSWindowDelegate, NSTextFieldDelegate 
         showPlaybackControls.state = style.presentation.showControls ? .on : .off
         islandPinned.state = style.presentation.islandPinned ? .on : .off
         islandPinned.isEnabled = style.presentation.mode.showsIsland
+        islandLines.selectedSegment = style.presentation.islandAppearance.expandedLineCount == 5 ? 1 : 0
+        islandLines.isEnabled = style.presentation.mode.showsIsland
         islandShape.selectItem(at: IslandShape.allCases.firstIndex(of: style.presentation.islandAppearance.shape) ?? 0)
         islandShape.isEnabled = style.presentation.mode.showsIsland
         petToggle.state = style.petEnabled ? .on : .off
@@ -624,6 +632,7 @@ final class AppearanceSettings: NSObject, NSWindowDelegate, NSTextFieldDelegate 
         style.presentation.showNextLine = showNextLine.state == .on
         style.presentation.showControls = showPlaybackControls.state == .on
         style.presentation.islandPinned = islandPinned.state == .on
+        style.presentation.islandAppearance.expandedLineCount = islandLines.selectedSegment == 1 ? 5 : 2
         if IslandShape.allCases.indices.contains(islandShape.indexOfSelectedItem) {
             style.presentation.islandAppearance.shape = IslandShape.allCases[islandShape.indexOfSelectedItem]
         }

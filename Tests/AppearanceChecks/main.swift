@@ -19,6 +19,7 @@ func verify() throws {
     try registerAppearanceFonts()
     try verifyWrapping()
     try verifyCompactLayouts()
+    try verifyReadingLayouts()
     let panel = LyricsPanel()
     panel.lyricsView.show(current: "Let the melody stay", next: "让文字跟着时间", detail: "Check")
     var changed = 0
@@ -75,7 +76,7 @@ func verify() throws {
     var invalidLayout = LyricsAppearance(); invalidLayout.lineGap = .infinity
     invalidLayout.presentation.desktopWidth = .nan; invalidLayout.presentation.islandWidth = .infinity
     let valid = invalidLayout.normalized()
-    try require(valid.lineGap == 8 && valid.presentation.desktopWidth == 940 && valid.presentation.islandWidth == 480, "Invalid stored dimensions must normalize before any window layout")
+    try require(valid.lineGap == 8 && valid.presentation.desktopWidth == 940 && valid.presentation.islandWidth == 560, "Invalid stored dimensions must normalize before any window layout")
     var playbackActions: [SettingsAction] = []
     panel.lyricsView.onPlaybackAction = { playbackActions.append($0) }
     island.onPlaybackAction = { playbackActions.append($0) }
@@ -274,7 +275,9 @@ if CommandLine.arguments.count == 4 && CommandLine.arguments[1] == "--verify-sto
 } else {
     _ = NSApplication.shared
     do {
-        if let index = CommandLine.arguments.firstIndex(of: "--compact-snapshots"), index + 1 < CommandLine.arguments.count {
+        if let index = CommandLine.arguments.firstIndex(of: "--reading-snapshots"), index + 1 < CommandLine.arguments.count {
+            try exportReadingPreviews(to: URL(fileURLWithPath: CommandLine.arguments[index + 1], isDirectory: true))
+        } else if let index = CommandLine.arguments.firstIndex(of: "--compact-snapshots"), index + 1 < CommandLine.arguments.count {
             try exportCompactPreviews(to: URL(fileURLWithPath: CommandLine.arguments[index + 1], isDirectory: true))
         } else if let index = CommandLine.arguments.firstIndex(of: "--wrapping-snapshots"), index + 1 < CommandLine.arguments.count {
             try exportWrappingPreviews(to: URL(fileURLWithPath: CommandLine.arguments[index + 1], isDirectory: true))

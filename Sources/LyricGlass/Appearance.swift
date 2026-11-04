@@ -151,7 +151,8 @@ enum IslandShape: String, Codable, CaseIterable {
         switch self { case .capsule: return "胶囊"; case .roundedRectangle: return "圆角长方形"; case .rectangle: return "长方形" }
     }
     func radius(height: CGFloat, expanded: Bool) -> CGFloat {
-        switch self { case .capsule: return expanded ? 22 : height / 2; case .roundedRectangle: return 6; case .rectangle: return 0 }
+        if !expanded { return height / 2 }
+        switch self { case .capsule: return min(22, height / 2); case .roundedRectangle: return 6; case .rectangle: return 0 }
     }
 }
 
@@ -161,6 +162,11 @@ struct IslandAppearance: Codable, Equatable {
     var expandedMaxHeight = 320.0
     var topOffset = 0.0
     var shape: IslandShape = .capsule
+    private var expandedRows: Int?
+    var expandedLineCount: Int {
+        get { expandedRows == 5 ? 5 : 2 }
+        set { expandedRows = newValue == 5 ? 5 : 2 }
+    }
 }
 
 struct LyricsPresentation: Codable, Equatable {
@@ -171,7 +177,7 @@ struct LyricsPresentation: Codable, Equatable {
     }
     var mode: LyricsDisplayMode = .both
     var desktopWidth = 940.0
-    var islandWidth = 480.0
+    var islandWidth = 560.0
     var showNextLine = true
     var showControls = true
     var islandPinned = false
@@ -280,10 +286,12 @@ extension LyricsAppearance {
         var value = self
         var presentation = self.presentation
         presentation.desktopWidth = presentation.desktopWidth.isFinite ? min(1400, max(480, presentation.desktopWidth)) : 940
-        presentation.islandWidth = presentation.islandWidth.isFinite ? min(1000, max(320, presentation.islandWidth)) : 480
+        presentation.islandWidth = presentation.islandWidth.isFinite ? min(1000, max(320, presentation.islandWidth)) : 560
         var island = presentation.islandAppearance
         island.compactWidth = island.compactWidth.isFinite ? min(1000, max(180, island.compactWidth)) : 420
-        island.compactHeight = island.compactHeight.isFinite ? min(64, max(18, island.compactHeight)) : 24
+        // Restore the original capsule, including settings saved by the brief
+        // two-line-as-collapsed implementation in v0.6.3.
+        island.compactHeight = island.compactHeight.isFinite && island.compactHeight <= 64 ? max(18, island.compactHeight) : 24
         island.expandedMaxHeight = island.expandedMaxHeight.isFinite ? min(720, max(160, island.expandedMaxHeight)) : 320
         island.topOffset = island.topOffset.isFinite ? min(80, max(0, island.topOffset)) : 0
         presentation.islandWidth = max(presentation.islandWidth, island.compactWidth)

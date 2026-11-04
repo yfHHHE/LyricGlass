@@ -147,6 +147,7 @@ func checkFalse(_ value: Bool, line: UInt = #line) { checkTrue(!value, line: lin
 
 let suite = TimelineTests()
 let cases: [(String, () -> Void)] = [
+    ("Five-line context follows playback, seeks, offsets and song boundaries", checkReadingContextFollowsTimeline),
     ("Localized artist aliases retain version, guest and duration guards", checkLocalizedArtistIdentitiesKeepRecordingGuards),
     ("LRC timestamps and repeated tags", suite.testTimestampsFractionsRepeatedTagsAndMetadata),
     ("LRC offset and simultaneous translations", suite.testOffsetAndBilingualSimultaneousLines),
