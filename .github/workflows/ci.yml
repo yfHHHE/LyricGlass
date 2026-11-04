@@ -18,6 +18,8 @@ jobs:
           persist-credentials: false
       - name: Check synchronization logic
         run: ./scripts/check.sh
+      - name: Check audio level analysis without recording
+        run: ./scripts/check-pet-audio.sh
       - name: Build universal app
         run: ./scripts/build-app.sh --universal
       - name: Verify both architectures and signature

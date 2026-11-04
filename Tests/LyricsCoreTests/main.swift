@@ -147,6 +147,7 @@ func checkFalse(_ value: Bool, line: UInt = #line) { checkTrue(!value, line: lin
 
 let suite = TimelineTests()
 let cases: [(String, () -> Void)] = [
+    ("Localized artist aliases retain version, guest and duration guards", checkLocalizedArtistIdentitiesKeepRecordingGuards),
     ("LRC timestamps and repeated tags", suite.testTimestampsFractionsRepeatedTagsAndMetadata),
     ("LRC offset and simultaneous translations", suite.testOffsetAndBilingualSimultaneousLines),
     ("Prelude, interlude and backwards seek", suite.testPreludeInterludeSeekBackwardAndFinalLine),
@@ -177,6 +178,16 @@ for (name, run) in cases {
     print("\(failures == before ? "PASS" : "FAIL") \(name)")
 }
 let asyncCases: [(String, () async -> Void)] = [
+    ("Localized search names fetch timed lyrics and reuse recording cache", checkLocalizedQueriesReachTimedLyrics),
+    ("lrcmux preserves milliseconds, attribution and offline cache", checkLrcmuxTimelineAttributionAndOfflineCache),
+    ("lrcmux rejects covers, versions, duration mismatches and invalid timing", checkLrcmuxRejectsWrongRecordingsAndUntimedText),
+    ("Fast valid sources win and cancel slow lookups", checkFastSourceWinsAndCancelsSlowSource),
+    ("At most two lyric sources run concurrently", checkSourceConcurrencyIsBounded),
+    ("Recording cache survives player and precision changes", checkRecordingCacheReuseAndIsolation),
+    ("Legacy cache keeps identity checks and original expiry", checkLegacyCacheReusesRecordingWithoutRenewingExpiry),
+    ("Source deadlines and track cancellation stop pending work", checkSourceDeadlineAndParentCancellation),
+    ("Business failures cool down and failed refresh keeps cache", checkBusinessFailuresCoolDownAndRefreshKeepsCache),
+    ("Different recording lengths retain separate cache entries", checkDifferentDurationsKeepSeparateCacheEntries),
     ("HTTP retries respect Retry-After", checkHTTPRetry),
     ("Plain lyrics do not block timed fallback", checkTimedFallback),
     ("Restarted app reads timed lyrics offline", checkCacheSurvivesRestartOffline),

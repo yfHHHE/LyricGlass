@@ -8,7 +8,11 @@ enum ArtistNames {
         ["Eason Chan", "陈奕迅"], ["Jay Chou", "周杰伦"],
         ["Faye Wong", "王菲"], ["Sodagreen", "苏打绿"],
         ["Accusefive", "告五人"], ["No Party For Cao Dong", "草东没有派对"],
-        ["Amazing Show", "美秀集团"]
+        ["Amazing Show", "美秀集团"],
+        // First-party identity/recording evidence: docs/lyrics-sources.md.
+        ["Shallow Levée", "浅堤"], ["I'mdifficult", "我是机车少女"],
+        ["puppiebelly", "burger.cue", "汉堡黄"],
+        ["Whys Young", "Yoon Jiyoung", "윤지영", "尹志英"]
     ]
 
     static func canonical(_ name: String) -> String {

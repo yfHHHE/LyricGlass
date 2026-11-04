@@ -8,7 +8,8 @@ let package = Package(
     targets: [
         .target(name: "LyricsCore"),
         .target(name: "PlaybackKit", dependencies: ["LyricsCore"]),
-        .executableTarget(name: "LyricGlass", dependencies: ["LyricsCore", "PlaybackKit"]),
+        .target(name: "PetAudio", linkerSettings: [.linkedFramework("CoreAudio")]),
+        .executableTarget(name: "LyricGlass", dependencies: ["LyricsCore", "PlaybackKit", "PetAudio"]),
         .executableTarget(name: "LyricsCoreChecks", dependencies: ["LyricsCore", "PlaybackKit"], path: "Tests/LyricsCoreTests")
     ]
 )

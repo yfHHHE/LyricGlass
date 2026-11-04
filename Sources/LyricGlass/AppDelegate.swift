@@ -3,9 +3,22 @@ import LyricsCore
 import PlaybackKit
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
-    let menu = NSMenu()
+    private lazy var quickMenu = QuickMenu { [weak self] action in
+        guard let self else { return }
+        switch action {
+        case .toggleVisible: self.toggleVisible()
+        case .toggleLock: self.toggleLock()
+        case .settings: self.openAppearanceSettings()
+        case .quit: self.quit()
+        }
+    }
+    var menu: NSMenu { quickMenu.menu }
     private var statusItem: NSStatusItem!
     private var panel: LyricsPanel!
+    private let appearanceStore = AppearanceStore()
+    private lazy var appearance = appearanceStore.load()
+    private var appearanceSettings: AppearanceSettings?
+    private var lastSettingsState: SettingsPlaybackState?
     private var player = DesktopPlayer(rawValue: UserDefaults.standard.string(forKey: "playbackPlayer") ?? "") ?? .spotify
     private var mode = PlaybackMode(rawValue: UserDefaults.standard.string(forKey: "playbackMode") ?? "") ?? .automatic
     private var detectedPlayer: DesktopPlayer?
@@ -31,21 +44,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var demoPosition = 0.0
     private var demoSampledAt = 0.0
     private var offset = 0.0
+    private let petAudio = PetAudioReaction()
+    private var petAudioArmed = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         if let selected = mode.selectedPlayer { player = selected }
         monitor = PlaybackMonitor(preferredPlayer: player)
         message = mode == .automatic ? "正在识别播放器…" : "正在连接 \(player.label)…"
         NSApp.setActivationPolicy(.accessory)
+        do { try registerAppearanceFonts() }
+        catch { NSLog("Could not load bundled OpenDyslexic: %@", error.localizedDescription) }
         panel = LyricsPanel()
+        panel.apply(appearance)
+        panel.lyricsView.onContextMenu = { [weak self] event, view in
+            guard let self else { return }
+            NSMenu.popUpContextMenu(self.menu, with: event, for: view)
+        }
         panel.orderFrontRegardless()
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        statusItem.button?.image = NSImage(systemSymbolName: "text.bubble.fill", accessibilityDescription: "LyricGlass 歌词菜单")
+        statusItem.button?.image = NSImage(systemSymbolName: "text.bubble.fill", accessibilityDescription: "LyricGlass")
         statusItem.button?.toolTip = "LyricGlass · 桌面歌词"
         statusItem.menu = menu
         menu.delegate = self
         makeMenu()
+        makeApplicationMenu()
         if CommandLine.arguments.contains("--demo") { startDemo() }
+        if CommandLine.arguments.contains("--settings") || CommandLine.arguments.contains("--pet-settings") {
+            openAppearanceSettings()
+            if CommandLine.arguments.contains("--pet-settings") { appearanceSettings?.showPage(.pet) }
+        }
         pollTimer = Timer(timeInterval: 0.5, repeats: true) { [weak self] _ in self?.poll() }
         renderTimer = Timer(timeInterval: 0.05, repeats: true) { [weak self] _ in self?.render() }
         RunLoop.main.add(pollTimer!, forMode: .common)
@@ -55,9 +82,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        petAudio.stop()
         pollTimer?.invalidate()
         renderTimer?.invalidate()
         lyricsTask?.cancel()
+        appearanceStore.defaults.synchronize()
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
@@ -169,7 +198,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             if parsed.lines.contains(where: { !$0.text.isEmpty }) { timeline = parsed; return }
         }
         message = "这首歌暂时没有逐行时间轴"
-        secondary = record.plainLyrics?.components(separatedBy: .newlines).first(where: { !$0.isEmpty }) ?? "可从菜单导入 LRC 歌词"
+        secondary = record.plainLyrics?.components(separatedBy: .newlines).first(where: { !$0.isEmpty }) ?? "可在“播放与歌词”中导入 LRC"
         source += " · 未同步"
     }
 
@@ -194,9 +223,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let info: String
         if let song {
             info = "\(demo ? "DEMO" : player.label) · \(song.artist) · \(song.title)   \(time(position)) / \(time(song.duration))   \(playing ? "播放中" : "已暂停")   \(source)   偏移 \(String(format: "%+.1fs", offset))   拖动可移动 · 右键菜单"
-        } else { info = "LyricGlass · 从菜单栏选择播放器或检查自动化权限" }
+        } else { info = "LyricGlass · 从菜单栏打开设置，连接播放器" }
         panel.lyricsView.show(current: pair?.current ?? message, next: pair?.next ?? secondary, detail: info)
+        let audioSelected = appearance.petEnabled && appearance.petMotion == .audio
+        let reducedMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        if audioSelected && petAudioArmed && playing && !demo && panel.isVisible && !reducedMotion {
+            petAudio.follow(bundleID: player.bundleIdentifier, at: now)
+        } else if petAudio.active { petAudio.stop() }
+        let pulse = petAudio.pulse()
+        panel.lyricsView.pet.update(time: now, playing: playing, motion: appearance.petMotion, pulse: pulse)
+        let petStatus = reducedMotion ? "系统已开启减少动态效果，雨滴保持静止" :
+            (!petAudioArmed ? "点击「连接音乐音频」后开始" : (demo ? "演示模式不采集播放器音频" : (!playing ? "已暂停 · 等待继续播放" : petAudio.status)))
+        appearanceSettings?.updatePetAudioStatus(petStatus)
         statusItem.button?.toolTip = song.map { "\($0.title) · \($0.artist)\(playing ? "" : " · 已暂停")" } ?? secondary
+        refreshSettingsState()
     }
 
     func menuWillOpen(_ menu: NSMenu) { if menu === self.menu { makeMenu() } }
@@ -207,72 +247,86 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return item
     }
 
-    private func makeMenu() {
-        menu.removeAllItems()
-        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
-        let title = NSMenuItem(title: "LyricGlass \(version) · 桌面歌词", action: nil, keyEquivalent: "")
-        menu.addItem(title)
-        menu.addItem(NSMenuItem(title: song.map { "\($0.title) — \($0.artist)" } ?? "等待播放", action: nil, keyEquivalent: ""))
-        let playing = demo ? demoPlaying : clock.isPlaying
-        menu.addItem(NSMenuItem(title: song == nil ? secondary : "\(time(position)) / \(time(song!.duration)) · \(playing ? "播放中" : "已暂停") · \(source)", action: nil, keyEquivalent: ""))
-        menu.addItem(.separator())
-        let players = NSMenuItem(title: "播放器：\(modeLabel)", action: nil, keyEquivalent: "")
-        let choices = NSMenu()
-        for (index, candidate) in PlaybackMode.allCases.enumerated() {
-            let option = item(candidate.label, #selector(selectMode(_:)))
-            option.tag = index
-            option.state = candidate == mode ? .on : .off
-            choices.addItem(option)
-        }
-        players.submenu = choices
-        menu.addItem(players)
-        menu.addItem(item(panel.isVisible ? "隐藏歌词" : "显示歌词", #selector(toggleVisible)))
-        let lock = item("锁定位置 / 鼠标穿透", #selector(toggleLock))
-        lock.state = panel.ignoresMouseEvents ? .on : .off
-        menu.addItem(lock)
-        menu.addItem(item("恢复主屏底部居中", #selector(recenter)))
-        let font = NSMenuItem(title: "歌词字号", action: nil, keyEquivalent: "")
-        let sizes = NSMenu()
-        for size in [24, 30, 36, 42] {
-            let option = item("\(size)", #selector(changeFont(_:)))
-            option.tag = size
-            option.state = panel.lyricsView.fontSize == CGFloat(size) ? .on : .off
-            sizes.addItem(option)
-        }
-        font.submenu = sizes; menu.addItem(font)
-        menu.addItem(.separator())
-        menu.addItem(NSMenuItem(title: "歌词偏移 \(String(format: "%+.1fs", offset))（正数提前）", action: nil, keyEquivalent: ""))
-        menu.addItem(item("歌词提前 0.5 秒", #selector(earlier)))
-        menu.addItem(item("歌词延后 0.5 秒", #selector(later)))
-        menu.addItem(item("重置歌词偏移", #selector(resetOffset)))
-        menu.addItem(item("重新匹配歌词", #selector(retryLyrics)))
-        menu.addItem(item("清空已缓存歌词", #selector(clearLyricsCache)))
-        menu.addItem(item("导入当前歌曲的 LRC…", #selector(importLRC)))
-        menu.addItem(.separator())
-        for (index, candidate) in DesktopPlayer.allCases.enumerated() {
-            let option = item("打开 \(candidate.label)", #selector(openPlayer(_:)))
-            option.tag = index
-            menu.addItem(option)
-        }
-        menu.addItem(item("重试播放器连接", #selector(reconnect)))
-        menu.addItem(item("打开自动化权限设置…", #selector(openPermissions)))
-        let demoItem = item("演示模式（自写歌词）", #selector(toggleDemo))
-        demoItem.state = demo ? .on : .off
-        menu.addItem(demoItem)
-        if demo {
-            menu.addItem(item(demoPlaying ? "演示：暂停" : "演示：继续播放", #selector(toggleDemoPlayback)))
-            menu.addItem(item("演示：跳到第 18 秒", #selector(seekDemo)))
-            menu.addItem(item("演示：从头播放", #selector(restartDemo)))
-        }
-        menu.addItem(.separator())
-        menu.addItem(item(selectedSource.map { "歌词来源：\($0.label)" } ?? "歌词来源：自动多源", #selector(openSource)))
-        menu.addItem(item("退出 LyricGlass", #selector(quit), key: "q"))
-    }
+    private func makeMenu() { quickMenu.update(visible: panel.isVisible, locked: panel.ignoresMouseEvents) }
 
     @objc private func toggleVisible() { panel.isVisible ? panel.orderOut(nil) : panel.orderFrontRegardless() }
-    @objc private func toggleLock() { panel.ignoresMouseEvents.toggle(); panel.lyricsView.setHovered(false) }
+    @objc private func toggleLock() { var value = appearance; value.clickThrough.toggle(); setAppearance(value) }
     @objc private func recenter() { panel.centerAtBottom(); panel.orderFrontRegardless() }
-    @objc private func changeFont(_ sender: NSMenuItem) { panel.lyricsView.fontSize = CGFloat(sender.tag) }
+    private func setAppearance(_ value: LyricsAppearance) {
+        appearance = value.normalized()
+        if !appearance.petEnabled || appearance.petMotion != .audio { petAudioArmed = false; petAudio.stop() }
+        appearanceStore.save(appearance)
+        panel.apply(appearance)
+        appearanceSettings?.update(appearance)
+    }
+
+    @objc private func openAppearanceSettings() {
+        if appearanceSettings == nil {
+            appearanceSettings = AppearanceSettings(style: appearance, onChange: { [weak self] in self?.setAppearance($0) },
+                                                    onRecenter: { [weak self] in self?.recenter() },
+                                                    onPlayer: { [weak self] in self?.selectPlaybackMode($0) },
+                                                    onAction: { [weak self] in self?.performSettingsAction($0) })
+        }
+        refreshSettingsState(force: true)
+        appearanceSettings?.showWindow()
+    }
+
+    private func refreshSettingsState(force: Bool = false) {
+        guard let settings = appearanceSettings else { return }
+        let playing = demo ? demoPlaying : clock.isPlaying
+        let state = SettingsPlaybackState(modeIndex: PlaybackMode.allCases.firstIndex(of: mode) ?? 0,
+            player: demo ? "示例歌词" : modeLabel,
+            title: song?.title ?? "等待播放", artist: song?.artist ?? "在 Spotify 或 Apple Music 播放一首歌",
+            status: song == nil ? secondary : "\(time(position)) / \(time(song!.duration)) · \(playing ? "播放中" : "已暂停")",
+            source: source, offset: offset, hasTrack: song != nil, demo: demo, playing: playing)
+        guard force || state != lastSettingsState else { return }
+        lastSettingsState = state
+        settings.updatePlayback(state)
+    }
+
+    private func performSettingsAction(_ action: SettingsAction) {
+        switch action {
+        case .earlier: earlier()
+        case .later: later()
+        case .resetOffset: resetOffset()
+        case .retryLyrics: retryLyrics()
+        case .importLRC: importLRC()
+        case .clearCache: clearLyricsCache()
+        case .reconnect: reconnect()
+        case .permissions: openPermissions()
+        case .openSpotify: openPlayer(.spotify)
+        case .openMusic: openPlayer(.appleMusic)
+        case .toggleDemo: toggleDemo()
+        case .demoPlayback: toggleDemoPlayback()
+        case .restartDemo: restartDemo()
+        case .seekDemo: seekDemo()
+        case .openSource: openSource()
+        case .connectPetAudio:
+            guard appearance.petEnabled && appearance.petMotion == .audio else { return }
+            petAudio.retry(); petAudioArmed = true; render()
+        case .openProject: NSWorkspace.shared.open(URL(string: "https://github.com/yfHHHE/LyricGlass")!)
+        case .openFontLicenses:
+            if let url = Bundle.main.resourceURL?.appendingPathComponent("Fonts") { NSWorkspace.shared.open(url) }
+        }
+        refreshSettingsState(force: true)
+    }
+
+    private func makeApplicationMenu() {
+        let main = NSMenu()
+        let appItem = NSMenuItem()
+        let appMenu = NSMenu()
+        appMenu.addItem(item("设置…", #selector(openAppearanceSettings), key: ","))
+        appMenu.addItem(.separator())
+        appMenu.addItem(item("退出 LyricGlass", #selector(quit), key: "q"))
+        appItem.submenu = appMenu; main.addItem(appItem)
+        let editItem = NSMenuItem(title: "编辑", action: nil, keyEquivalent: "")
+        let editMenu = NSMenu(title: "编辑")
+        for (title, action, key) in [("剪切", "cut:", "x"), ("复制", "copy:", "c"), ("粘贴", "paste:", "v"), ("全选", "selectAll:", "a")] {
+            editMenu.addItem(NSMenuItem(title: title, action: Selector(action), keyEquivalent: key))
+        }
+        editItem.submenu = editMenu; main.addItem(editItem)
+        NSApp.mainMenu = main
+    }
     @objc private func earlier() { offset = min(15, offset + 0.5); render() }
     @objc private func later() { offset = max(-15, offset - 0.5); render() }
     @objc private func resetOffset() { offset = 0; render() }
@@ -288,9 +342,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             DispatchQueue.main.async { self?.poll() }
         }
     }
-    @objc private func selectMode(_ sender: NSMenuItem) {
-        guard PlaybackMode.allCases.indices.contains(sender.tag) else { return }
-        let selected = PlaybackMode.allCases[sender.tag]
+    private func selectPlaybackMode(_ index: Int) {
+        guard PlaybackMode.allCases.indices.contains(index) else { return }
+        let selected = PlaybackMode.allCases[index]
         guard selected != mode else { return }
         modeGeneration += 1
         demo = false
@@ -303,9 +357,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         secondary = "首次使用请允许读取播放器状态"
         poll(); render()
     }
-    @objc private func openPlayer(_ sender: NSMenuItem) {
-        guard DesktopPlayer.allCases.indices.contains(sender.tag) else { return }
-        let player = DesktopPlayer.allCases[sender.tag]
+    private func openPlayer(_ player: DesktopPlayer) {
         guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: player.bundleIdentifier) else {
             NSWorkspace.shared.open(URL(string: player == .spotify ? "https://www.spotify.com/download/mac/" : "https://music.apple.com/")!); return
         }

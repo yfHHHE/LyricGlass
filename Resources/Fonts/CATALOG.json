@@ -1,0 +1,159 @@
+{
+  "license": "SIL Open Font License 1.1; see each family OFL.txt",
+  "files": [
+    {
+      "file": "NotoSansSC/NotoSansSC.ttf",
+      "url": "https://raw.githubusercontent.com/google/fonts/2fe1e8c6b137fb13041a7cfca6fdcd8a910ea4dc/ofl/notosanssc/NotoSansSC%5Bwght%5D.ttf",
+      "revision": "2fe1e8c6b137fb13041a7cfca6fdcd8a910ea4dc",
+      "bytes": 17772300,
+      "sha256": "a3041811a78c361b1de50f953c805e0244951c21c5bd412f7232ef0d899af0da"
+    },
+    {
+      "file": "NotoSansSC/OFL.txt",
+      "url": "https://raw.githubusercontent.com/google/fonts/2fe1e8c6b137fb13041a7cfca6fdcd8a910ea4dc/ofl/notosanssc/OFL.txt",
+      "revision": "2fe1e8c6b137fb13041a7cfca6fdcd8a910ea4dc",
+      "bytes": 4388,
+      "sha256": "1c05c68c34f9708415aada51f17e1b0092d2cea709bf4a94cd38114f9e73d7d9"
+    },
+    {
+      "file": "NotoSerifSC/NotoSerifSC.ttf",
+      "url": "https://raw.githubusercontent.com/google/fonts/2fe1e8c6b137fb13041a7cfca6fdcd8a910ea4dc/ofl/notoserifsc/NotoSerifSC%5Bwght%5D.ttf",
+      "revision": "2fe1e8c6b137fb13041a7cfca6fdcd8a910ea4dc",
+      "bytes": 25125512,
+      "sha256": "050080d9255a86808f2945bffac582b31ef32bc36411ce29563b4961670c66f9"
+    },
+    {
+      "file": "NotoSerifSC/OFL.txt",
+      "url": "https://raw.githubusercontent.com/google/fonts/2fe1e8c6b137fb13041a7cfca6fdcd8a910ea4dc/ofl/notoserifsc/OFL.txt",
+      "revision": "2fe1e8c6b137fb13041a7cfca6fdcd8a910ea4dc",
+      "bytes": 4350,
+      "sha256": "5e0da210fb04058a8c0087985d2d456b931c2579811a49655721d3cf0c36b6d6"
+    },
+    {
+      "file": "Inter/Inter.ttf",
+      "url": "https://raw.githubusercontent.com/google/fonts/2fe1e8c6b137fb13041a7cfca6fdcd8a910ea4dc/ofl/inter/Inter%5Bopsz%2Cwght%5D.ttf",
+      "revision": "2fe1e8c6b137fb13041a7cfca6fdcd8a910ea4dc",
+      "bytes": 876576,
+      "sha256": "29160a80ff49ddcab2c97711247e08b1fab27a484a329ce8b813d820dc559031"
+    },
+    {
+      "file": "Inter/OFL.txt",
+      "url": "https://raw.githubusercontent.com/google/fonts/2fe1e8c6b137fb13041a7cfca6fdcd8a910ea4dc/ofl/inter/OFL.txt",
+      "revision": "2fe1e8c6b137fb13041a7cfca6fdcd8a910ea4dc",
+      "bytes": 4377,
+      "sha256": "5b9321a4298cfeb6b34354164a1c3afc3db114569984c502b9b35d988fd58c57"
+    },
+    {
+      "file": "JetBrainsMono/JetBrainsMono.ttf",
+      "url": "https://raw.githubusercontent.com/google/fonts/2fe1e8c6b137fb13041a7cfca6fdcd8a910ea4dc/ofl/jetbrainsmono/JetBrainsMono%5Bwght%5D.ttf",
+      "revision": "2fe1e8c6b137fb13041a7cfca6fdcd8a910ea4dc",
+      "bytes": 187208,
+      "sha256": "48715a42ec242c21e9f02692891e147d022299a52e48d5e413e1a942193ffeda"
+    },
+    {
+      "file": "JetBrainsMono/OFL.txt",
+      "url": "https://raw.githubusercontent.com/google/fonts/2fe1e8c6b137fb13041a7cfca6fdcd8a910ea4dc/ofl/jetbrainsmono/OFL.txt",
+      "revision": "2fe1e8c6b137fb13041a7cfca6fdcd8a910ea4dc",
+      "bytes": 4399,
+      "sha256": "b2fe5e8987594e9ffd1d2ca52a2f5d73eb8335243893c5d6254b5ad69269591d"
+    },
+    {
+      "file": "FiraCode/FiraCode.ttf",
+      "url": "https://raw.githubusercontent.com/google/fonts/2fe1e8c6b137fb13041a7cfca6fdcd8a910ea4dc/ofl/firacode/FiraCode%5Bwght%5D.ttf",
+      "revision": "2fe1e8c6b137fb13041a7cfca6fdcd8a910ea4dc",
+      "bytes": 260364,
+      "sha256": "9335b082b3c7850d98a64b584f3417f65355f3471278bb5eeb8c6c0e8657aeeb"
+    },
+    {
+      "file": "FiraCode/OFL.txt",
+      "url": "https://raw.githubusercontent.com/google/fonts/2fe1e8c6b137fb13041a7cfca6fdcd8a910ea4dc/ofl/firacode/OFL.txt",
+      "revision": "2fe1e8c6b137fb13041a7cfca6fdcd8a910ea4dc",
+      "bytes": 4391,
+      "sha256": "926041dac670e6922505e35ac1661a4e8d20f1ffeabbbcb5edb5544370702369"
+    },
+    {
+      "file": "CascadiaCode/CascadiaCode.ttf",
+      "url": "https://raw.githubusercontent.com/google/fonts/2fe1e8c6b137fb13041a7cfca6fdcd8a910ea4dc/ofl/cascadiacode/CascadiaCode%5Bwght%5D.ttf",
+      "revision": "2fe1e8c6b137fb13041a7cfca6fdcd8a910ea4dc",
+      "bytes": 727940,
+      "sha256": "30f2e14a5c389b346b1fce110c4ddcf0dc5ce8265faf5eca2ab7323f49dba590"
+    },
+    {
+      "file": "CascadiaCode/OFL.txt",
+      "url": "https://raw.githubusercontent.com/google/fonts/2fe1e8c6b137fb13041a7cfca6fdcd8a910ea4dc/ofl/cascadiacode/OFL.txt",
+      "revision": "2fe1e8c6b137fb13041a7cfca6fdcd8a910ea4dc",
+      "bytes": 4395,
+      "sha256": "82c05d6c53dfa0c9025985c19e371810020b74ed2c61d51d370f2a8ab2506d52"
+    },
+    {
+      "file": "Merriweather/Merriweather.ttf",
+      "url": "https://raw.githubusercontent.com/google/fonts/2fe1e8c6b137fb13041a7cfca6fdcd8a910ea4dc/ofl/merriweather/Merriweather%5Bopsz%2Cwdth%2Cwght%5D.ttf",
+      "revision": "2fe1e8c6b137fb13041a7cfca6fdcd8a910ea4dc",
+      "bytes": 4628080,
+      "sha256": "d0ed0e359e396af7ad05e73dffd11a3a4c326ea0d0283c56bd9361cb2cc86a96"
+    },
+    {
+      "file": "Merriweather/OFL.txt",
+      "url": "https://raw.githubusercontent.com/google/fonts/2fe1e8c6b137fb13041a7cfca6fdcd8a910ea4dc/ofl/merriweather/OFL.txt",
+      "revision": "2fe1e8c6b137fb13041a7cfca6fdcd8a910ea4dc",
+      "bytes": 4438,
+      "sha256": "715bd349bfa6116f99e351e1548321dcfa25b91df65502d22ca8d624557697d2"
+    },
+    {
+      "file": "EBGaramond/EBGaramond.ttf",
+      "url": "https://raw.githubusercontent.com/google/fonts/2fe1e8c6b137fb13041a7cfca6fdcd8a910ea4dc/ofl/ebgaramond/EBGaramond%5Bwght%5D.ttf",
+      "revision": "2fe1e8c6b137fb13041a7cfca6fdcd8a910ea4dc",
+      "bytes": 851176,
+      "sha256": "ef9512f92f6d579e5dc75af59a5a4b1b8b47d2eda89e00b954d44520e5369027"
+    },
+    {
+      "file": "EBGaramond/OFL.txt",
+      "url": "https://raw.githubusercontent.com/google/fonts/2fe1e8c6b137fb13041a7cfca6fdcd8a910ea4dc/ofl/ebgaramond/OFL.txt",
+      "revision": "2fe1e8c6b137fb13041a7cfca6fdcd8a910ea4dc",
+      "bytes": 4398,
+      "sha256": "0985066662eb755ed3683ae5482a81a9195b49ce3f7e165cc2388b3dbece7dd7"
+    },
+    {
+      "file": "LXGWWenKai/LXGWWenKai-Regular.ttf",
+      "url": "https://raw.githubusercontent.com/lxgw/LxgwWenKai/da0fdf92a0adc5d83c82ecde06d6665c97a2a45e/fonts/TTF/LXGWWenKai-Regular.ttf",
+      "revision": "da0fdf92a0adc5d83c82ecde06d6665c97a2a45e",
+      "bytes": 25928940,
+      "sha256": "2d73eea94ad808999d90c0000c239a84a33b09d4bc6ab6c5b8bbf1eda8a7fc8b"
+    },
+    {
+      "file": "LXGWWenKai/LXGWWenKai-Medium.ttf",
+      "url": "https://raw.githubusercontent.com/lxgw/LxgwWenKai/da0fdf92a0adc5d83c82ecde06d6665c97a2a45e/fonts/TTF/LXGWWenKai-Medium.ttf",
+      "revision": "da0fdf92a0adc5d83c82ecde06d6665c97a2a45e",
+      "bytes": 25800076,
+      "sha256": "f4b8a34d1f838fe411540cb7c97b1c384ac9738a876c4104500bc42508b2312a"
+    },
+    {
+      "file": "LXGWWenKai/OFL.txt",
+      "url": "https://raw.githubusercontent.com/lxgw/LxgwWenKai/da0fdf92a0adc5d83c82ecde06d6665c97a2a45e/OFL.txt",
+      "revision": "da0fdf92a0adc5d83c82ecde06d6665c97a2a45e",
+      "bytes": 5171,
+      "sha256": "1a25e35da1031c6c3436fde545bb9cb5aca954e9873afe510c834b8b79bd21a0"
+    },
+    {
+      "file": "GenRyuMin/GenRyuMin2TC-R.otf",
+      "url": "https://raw.githubusercontent.com/ButTaiwan/genryu-font/030cd4fa3dd6b0607c5e7f35f13977a2e0a10522/otf/TC/GenRyuMin2TC-R.otf",
+      "revision": "030cd4fa3dd6b0607c5e7f35f13977a2e0a10522",
+      "bytes": 16454556,
+      "sha256": "8b4988af4fb8e7fea14245fdd61fa309ad730cb7c79a5b861eabe84db5a16774"
+    },
+    {
+      "file": "GenRyuMin/GenRyuMin2TC-B.otf",
+      "url": "https://raw.githubusercontent.com/ButTaiwan/genryu-font/030cd4fa3dd6b0607c5e7f35f13977a2e0a10522/otf/TC/GenRyuMin2TC-B.otf",
+      "revision": "030cd4fa3dd6b0607c5e7f35f13977a2e0a10522",
+      "bytes": 16222784,
+      "sha256": "ba2277d569d51e9d2ff6805225b75d4624eb7daeb303b03fa6dfe4d220b643d0"
+    },
+    {
+      "file": "GenRyuMin/OFL.txt",
+      "url": "https://raw.githubusercontent.com/ButTaiwan/genryu-font/030cd4fa3dd6b0607c5e7f35f13977a2e0a10522/SIL_Open_Font_License_1.1.txt",
+      "revision": "030cd4fa3dd6b0607c5e7f35f13977a2e0a10522",
+      "bytes": 4464,
+      "sha256": "d84b652ca46586043946969a33c1dbf5a43028440825ae744a325965bec4c8fb"
+    }
+  ]
+}

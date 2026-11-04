@@ -35,6 +35,33 @@ struct RemoteLyrics {
         _ = try await http.data(for: request)
     }
 
+    func lrcmux(_ song: Song) async throws -> [LyricsRecord] {
+        // The native JSON route includes matched track metadata and upstream attribution;
+        // the LRCLIB-compatible route drops the latter. Never substitute requested metadata.
+        let reply: LrcmuxReply = try await json("https://api.lrcmux.dev/get", [
+            "title": song.title, "artist": song.artist, "album": song.album,
+            "duration": String(Int(song.duration.rounded())), "level": "line", "strict": "true"
+        ])
+        guard ["line", "word"].contains(reply.meta.level) || reply.meta.instrumental == true else { return [] }
+        let track = reply.track
+        let metadata = LyricsRecord(trackName: track.title, artistName: track.artist, albumName: track.album,
+                                    duration: track.duration, source: .lrcmux)
+        guard LyricsProvider.matches(metadata, song: song) else { return [] }
+        let lines = reply.lines ?? []
+        let lrc = lines.compactMap { line -> String? in
+            guard let start = line.start, start.isFinite, start >= 0, start <= (track.duration + 2) * 1000,
+                  start < Double(Int.max - 4) else { return nil }
+            let ms = Int(start.rounded())
+            let stamp = String(format: "[%02d:%02d.%03d]", ms / 60000, (ms / 1000) % 60, ms % 1000)
+            let text = line.text.components(separatedBy: .newlines).joined(separator: " · ")
+            return stamp + text
+        }.joined(separator: "\n")
+        return [LyricsRecord(trackName: track.title, artistName: track.artist, albumName: track.album,
+                             duration: track.duration, instrumental: reply.meta.instrumental ?? false,
+                             plainLyrics: lines.map(\.text).joined(separator: "\n"), syncedLyrics: lrc,
+                             source: .lrcmux, upstreamSource: reply.meta.source?.name)]
+    }
+
     func netease(_ song: Song) async throws -> [LyricsRecord] {
         let title = Self.simplified(SongMatcher.queryTitle(song.title))
         let queries = [title + " " + ArtistNames.queryName(song.artist), title]
@@ -197,3 +224,12 @@ private struct QQLyrics: Decodable { let code: Int; let lyric: String? }
 private struct KugouTrack: Decodable { let id: String; let song: String; let singer: String; let duration: Double; let accesskey: String }
 private struct KugouSearch: Decodable { let status: Int; let candidates: [KugouTrack]? }
 private struct KugouLyrics: Decodable { let status: Int; let content: String? }
+private struct LrcmuxReply: Decodable {
+    let track: Track
+    let meta: Meta
+    let lines: [Line]?
+    struct Track: Decodable { let title: String; let artist: String; let album: String; let duration: Double }
+    struct Meta: Decodable { let level: String; let instrumental: Bool?; let source: Upstream? }
+    struct Upstream: Decodable { let name: String }
+    struct Line: Decodable { let text: String; let start: Double? }
+}

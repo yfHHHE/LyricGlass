@@ -17,7 +17,7 @@ if CommandLine.arguments.contains("--check-lyrics") {
     }
     let selected = argument("--source")
     guard selected == nil || selected == "all" || LyricsSource(rawValue: selected!) != nil else {
-        fputs("--source must be all, lrclib, netease, qq or kugou\n", stderr); exit(2)
+        fputs("--source must be all, lrclib, netease, qq, kugou or lrcmux\n", stderr); exit(2)
     }
     Task {
         do {
@@ -29,7 +29,7 @@ if CommandLine.arguments.contains("--check-lyrics") {
             let record = try await provider.fetch(song: song, forceReload: CommandLine.arguments.contains("--fresh"))
             let count = LyricsTimeline(lrc: record.syncedLyrics ?? "").lines.count
             let output: [String: Any] = ["title": record.trackName, "artist": record.artistName, "album": record.albumName ?? "",
-                "duration": record.duration, "source": record.sourceKind.rawValue, "cached": record.cached,
+                "duration": record.duration, "source": record.sourceKind.rawValue, "upstream": record.upstreamSource ?? "", "cached": record.cached,
                 "synced": record.hasSyncedLyrics, "timed_lines": count,
                 "elapsed_ms": Int((ProcessInfo.processInfo.systemUptime - started) * 1000)]
             let data = try JSONSerialization.data(withJSONObject: output, options: [.sortedKeys])

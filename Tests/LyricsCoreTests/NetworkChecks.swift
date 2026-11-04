@@ -208,7 +208,9 @@ func checkCancellation() async {
         checkTrue(false)
     } catch is CancellationError { }
     catch { failures += 1; print("FAIL cancellation propagation: \(error)") }
-    checkEqual(await fixture.calls, 1)
+    // Both initial sources may start before either cancellation is observed.
+    let calls = await fixture.calls
+    checkTrue((1...2).contains(calls))
 }
 
 func checkCorruptCache() async {
