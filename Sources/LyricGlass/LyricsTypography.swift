@@ -6,7 +6,7 @@ enum LyricsTypography {
         let chinese = style.chineseFont.font(size: size, bold: bold)
         let paragraph = NSMutableParagraphStyle()
         paragraph.alignment = .center
-        paragraph.lineBreakMode = .byTruncatingTail
+        paragraph.lineBreakMode = .byWordWrapping
         let result = NSMutableAttributedString(string: text, attributes: [.font: english, .foregroundColor: color, .paragraphStyle: paragraph])
         var offset = 0
         var chineseStart: Int?
@@ -41,5 +41,49 @@ enum LyricsTypography {
         let descender = fonts.map { -$0.descender }.max() ?? 0
         let leading = fonts.map(\.leading).max() ?? 0
         return ceil(max(size * 1.45, ascender + descender + leading + 6))
+    }
+
+    static func configureWrapping(_ label: NSTextField) {
+        label.maximumNumberOfLines = 0
+        label.lineBreakMode = .byWordWrapping
+        label.allowsDefaultTighteningForTruncation = false
+        label.cell?.usesSingleLineMode = false
+        label.cell?.wraps = true
+        label.cell?.isScrollable = false
+        (label.cell as? NSTextFieldCell)?.truncatesLastVisibleLine = false
+    }
+
+    static func wrappedHeight(_ label: NSTextField, width: CGFloat, minimum: CGFloat) -> CGFloat {
+        let bounds = NSRect(x: 0, y: 0, width: max(1, width), height: .greatestFiniteMagnitude)
+        // Measure the actual field cell, including its insets and mixed-font glyphs.
+        return max(minimum, ceil(label.cell?.cellSize(forBounds: bounds).height ?? minimum) + 4)
+    }
+}
+
+// Keep unusually long lyric paragraphs on screen without shrinking or discarding text.
+final class LyricsTextViewport: NSScrollView {
+    let textDocument = NSView()
+    private var resetToTop = true
+
+    init() {
+        super.init(frame: .zero)
+        drawsBackground = false; borderType = .noBorder
+        hasVerticalScroller = true; hasHorizontalScroller = false
+        autohidesScrollers = true; scrollerStyle = .overlay
+        horizontalScrollElasticity = .none
+        contentView.drawsBackground = false
+        documentView = textDocument
+    }
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    func resetPosition() { resetToTop = true }
+    func fitDocument(height: CGFloat) {
+        let size = NSSize(width: contentSize.width, height: max(contentSize.height, height))
+        if textDocument.frame.size != size { textDocument.setFrameSize(size) }
+        if resetToTop {
+            contentView.scroll(to: NSPoint(x: 0, y: max(0, size.height - contentSize.height)))
+            reflectScrolledClipView(contentView)
+            resetToTop = false
+        }
     }
 }

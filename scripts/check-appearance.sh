@@ -7,7 +7,7 @@ mkdir -p "$TASK_APP/Contents/MacOS" "$TASK_APP/Contents/Resources" "$TASK_ROOT/.
 xcrun swiftc -O -gnone -swift-version 5 -module-cache-path "$TASK_ROOT/.build/module-cache" \
   Sources/LyricGlass/RaindropScene.swift Sources/LyricGlass/Appearance.swift Sources/LyricGlass/LyricsTypography.swift Sources/LyricGlass/PlaybackControls.swift Sources/LyricGlass/LyricsPanel.swift Sources/LyricGlass/IslandPanel.swift \
   Sources/LyricGlass/AppearancePreview.swift Sources/LyricGlass/SettingsControls.swift Sources/LyricGlass/QuickMenu.swift Sources/LyricGlass/SettingsState.swift Sources/LyricGlass/AppearanceSettings.swift \
-  Tests/AppearanceChecks/main.swift -framework AppKit -framework CoreText -framework SceneKit \
+  Tests/AppearanceChecks/WrappingChecks.swift Tests/AppearanceChecks/main.swift -framework AppKit -framework CoreText -framework SceneKit \
   -o "$TASK_APP/Contents/MacOS/AppearanceChecks"
 cat > "$TASK_APP/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>

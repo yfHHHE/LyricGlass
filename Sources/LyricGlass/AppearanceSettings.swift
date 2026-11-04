@@ -303,6 +303,11 @@ final class AppearanceSettings: NSObject, NSWindowDelegate, NSTextFieldDelegate 
         let preview = stack([], vertical: true, spacing: 8)
         fullWidth(stack([label("预览", size: 11, color: SettingsPalette.secondary), flexibleSpace(), language]), in: preview)
         previewHeight = scene.heightAnchor.constraint(equalToConstant: 150); previewHeight.isActive = true
+        scene.onPreferredHeightChange = { [weak self] in
+            guard let self else { return }
+            let height = self.scene.preferredHeight
+            if abs(self.previewHeight.constant - height) > 0.5 { self.previewHeight.constant = height }
+        }
         fullWidth(scene, in: preview); fullWidth(preview, in: body)
         displayMode.addItems(withTitles: LyricsDisplayMode.allCases.map(\.title))
         displayMode.target = self; displayMode.action = #selector(presentationChanged(_:))
@@ -516,7 +521,7 @@ final class AppearanceSettings: NSObject, NSWindowDelegate, NSTextFieldDelegate 
         visualStyle.presentation = LyricsPresentation()
         presets.selectedSegment = (0...2).first { LyricsAppearance.preset($0).normalized() == visualStyle.normalized() } ?? -1
         scene.lyrics.apply(style)
-        previewHeight.constant = scene.lyrics.preferredPreviewHeight
+        previewHeight.constant = scene.preferredHeight
         if save { onChange(style); saved.stringValue = "已自动保存" }
     }
     @objc private func navigate(_ sender: NSButton) { if let page = SettingsPage(rawValue: sender.tag) { showPage(page) } }

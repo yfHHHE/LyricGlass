@@ -17,6 +17,7 @@ func verify() throws {
     let store = AppearanceStore(defaults: defaults)
     _ = AppearanceStore().load() // Real startup path: never construct a suite from the app's own bundle ID.
     try registerAppearanceFonts()
+    try verifyWrapping()
     let panel = LyricsPanel()
     panel.lyricsView.show(current: "Let the melody stay", next: "让文字跟着时间", detail: "Check")
     var changed = 0
@@ -272,7 +273,9 @@ if CommandLine.arguments.count == 4 && CommandLine.arguments[1] == "--verify-sto
 } else {
     _ = NSApplication.shared
     do {
-        if let index = CommandLine.arguments.firstIndex(of: "--island-snapshot"), index + 1 < CommandLine.arguments.count {
+        if let index = CommandLine.arguments.firstIndex(of: "--wrapping-snapshots"), index + 1 < CommandLine.arguments.count {
+            try exportWrappingPreviews(to: URL(fileURLWithPath: CommandLine.arguments[index + 1], isDirectory: true))
+        } else if let index = CommandLine.arguments.firstIndex(of: "--island-snapshot"), index + 1 < CommandLine.arguments.count {
             try registerAppearanceFonts()
             let island = IslandPanel()
             var style = LyricsAppearance(); style.chineseFont = .wenkai; style.englishFont = .inter

@@ -21,7 +21,7 @@ struct IslandGeometry {
     func frame(expanded: Bool, width: CGFloat, height: CGFloat) -> NSRect {
         let desiredWidth = expanded ? max(width, notchWidth + 100) : max(280, notchWidth + 100)
         let actualWidth = min(desiredWidth, max(1, screenFrame.width - 24))
-        let actualHeight = min(expanded ? height : max(32, topInset + 6), screenFrame.height)
+        let actualHeight = min(expanded ? height : max(32, topInset + 6), max(1, screenFrame.height - 12))
         return NSRect(x: screenFrame.midX - actualWidth / 2, y: screenFrame.maxY - actualHeight,
                       width: actualWidth, height: actualHeight)
     }
@@ -49,6 +49,10 @@ final class IslandPanel: NSPanel {
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
         hidesOnDeactivate = false; isReleasedWhenClosed = false
         contentView = islandView
+        islandView.onPreferredHeightChange = { [weak self] in
+            guard let self, self.expanded else { return }
+            self.resizeToFitContent()
+        }
         islandView.onHover = { [weak self] hovered in
             guard let self else { return }
             self.collapse?.cancel()
@@ -83,8 +87,12 @@ final class IslandPanel: NSPanel {
         guard let screen = NSScreen.screens.first ?? NSScreen.main else { return }
         islandView.geometry = IslandGeometry(screen: screen)
         islandView.expanded = expanded
-        setFrame(islandView.geometry.frame(expanded: expanded, width: style.presentation.islandWidth,
-                  height: islandView.expandedHeight), display: true)
+        resizeToFitContent()
+    }
+    private func resizeToFitContent() {
+        let target = islandView.geometry.frame(expanded: expanded, width: style.presentation.islandWidth,
+                                               height: islandView.expandedHeight)
+        if target != frame { setFrame(target, display: true) }
     }
     func setExpanded(_ value: Bool, animated: Bool = true) {
         guard expanded != value else { return }
@@ -107,6 +115,7 @@ final class IslandView: NSView {
     let current = NSTextField(labelWithString: "")
     let next = NSTextField(labelWithString: "")
     let compact = NSButton()
+    let textViewport = LyricsTextViewport()
     private let track = NSTextField(labelWithString: "LyricGlass")
     private let status = NSImageView()
     private let settings = NSButton()
@@ -115,11 +124,14 @@ final class IslandView: NSView {
     private var style = LyricsAppearance()
     private var tracking: NSTrackingArea?
     private var fraction: CGFloat = 0
+    private var measuredWidth: CGFloat = -1
+    private var measuredHeights: (CGFloat, CGFloat) = (0, 0)
+    var onPreferredHeightChange: (() -> Void)?
     var onHover: ((Bool) -> Void)?
     var onExpand: (() -> Void)?
     var onSettings: (() -> Void)?
     var geometry = IslandGeometry(screenFrame: NSRect(x: 0, y: 0, width: 1440, height: 900)) {
-        didSet { needsLayout = true }
+        didSet { measuredWidth = -1; textViewport.resetPosition(); needsLayout = true }
     }
     var expanded = false { didSet { updateVisibility(); needsLayout = true } }
 
@@ -147,22 +159,32 @@ final class IslandView: NSView {
             label.lineBreakMode = .byTruncatingTail; label.maximumNumberOfLines = 1
             label.alignment = .center; label.isSelectable = false
         }
+        for label in [current, next] { LyricsTypography.configureWrapping(label); textViewport.textDocument.addSubview(label) }
         track.font = .systemFont(ofSize: 11, weight: .medium); track.textColor = .lightGray
         for view in [progressTrack, progress] { view.wantsLayer = true }
         progressTrack.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.12).cgColor
         progress.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.6).cgColor
         status.contentTintColor = .lightGray
-        for view in [compact, status, track, current, next, settings, controls, progressTrack, progress] { addSubview(view) }
+        for view in [compact, status, track, textViewport, settings, controls, progressTrack, progress] { addSubview(view) }
         updateVisibility()
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
     private var primarySize: CGFloat { min(24, max(16, style.primarySize * 0.65)) }
     private var secondarySize: CGFloat { min(20, max(12, style.secondarySize * 0.65)) }
-    private var firstHeight: CGFloat { LyricsTypography.lineHeight(style: style, size: primarySize, bold: style.bold) }
-    private var secondHeight: CGFloat { LyricsTypography.lineHeight(style: style, size: secondarySize, bold: false) }
+    private func textHeights(width: CGFloat) -> (CGFloat, CGFloat) {
+        if measuredWidth != width {
+            measuredHeights = (
+                LyricsTypography.wrappedHeight(current, width: max(1, width), minimum: LyricsTypography.lineHeight(style: style, size: primarySize, bold: style.bold)),
+                style.presentation.showNextLine ? LyricsTypography.wrappedHeight(next, width: max(1, width), minimum: LyricsTypography.lineHeight(style: style, size: secondarySize, bold: false)) : 0)
+            measuredWidth = width
+        }
+        return measuredHeights
+    }
     var expandedHeight: CGFloat {
-        geometry.contentTopInset + 22 + firstHeight + (style.presentation.showNextLine ? style.lineGap + secondHeight : 0)
+        let width = geometry.frame(expanded: true, width: style.presentation.islandWidth, height: 1).width - 40
+        let (first, second) = textHeights(width: width)
+        return geometry.contentTopInset + 22 + first + (style.presentation.showNextLine ? style.lineGap + second : 0)
             + (style.presentation.showControls ? 38 : 0) + 14
     }
     func apply(_ value: LyricsAppearance) {
@@ -175,9 +197,11 @@ final class IslandView: NSView {
         label.attributedStringValue = LyricsTypography.attributedText(text, style: style,
             size: primary ? primarySize : secondarySize, bold: primary && style.bold,
             color: primary ? .white : NSColor.white.withAlphaComponent(0.65))
+        measuredWidth = -1; textViewport.resetPosition()
     }
     func show(current text: String, next upcoming: String, title: String, artist: String,
               playing: Bool, canControl: Bool, position: Double, duration: Double, error: String) {
+        let changed = current.stringValue != text || next.stringValue != upcoming
         if current.stringValue != text { updateText(current, text: text, primary: true) }
         if next.stringValue != upcoming { updateText(next, text: upcoming, primary: false) }
         let metadata = error.isEmpty ? [title, artist].filter { !$0.isEmpty }.joined(separator: " · ") : error
@@ -196,11 +220,12 @@ final class IslandView: NSView {
         }
         controls.update(playing: playing, enabled: canControl)
         fraction = duration > 0 && position.isFinite ? CGFloat(min(1, max(0, position / duration))) : 0
+        if changed { onPreferredHeightChange?() }
         needsLayout = true
     }
     private func updateVisibility() {
         compact.isHidden = expanded; status.isHidden = expanded
-        for view in [track, current, settings, progressTrack, progress] { view.isHidden = !expanded }
+        for view in [track, textViewport, settings, progressTrack, progress] { view.isHidden = !expanded }
         next.isHidden = !expanded || !style.presentation.showNextLine
         controls.isHidden = !expanded || !style.presentation.showControls
         layer?.cornerRadius = expanded ? 22 : 16
@@ -213,9 +238,16 @@ final class IslandView: NSView {
         track.frame = NSRect(x: 40, y: top - 16, width: max(0, bounds.width - 80), height: 16)
         settings.frame = NSRect(x: bounds.width - 32, y: top - 19, width: 24, height: 24)
         top -= 22
-        current.frame = NSRect(x: 20, y: top - firstHeight, width: max(0, bounds.width - 40), height: firstHeight)
-        top -= firstHeight + style.lineGap
-        next.frame = NSRect(x: 20, y: top - secondHeight, width: max(0, bounds.width - 40), height: secondHeight)
+        let width = max(1, bounds.width - 40)
+        let (first, second) = textHeights(width: width)
+        let gap = style.presentation.showNextLine ? style.lineGap : 0
+        let total = first + second + gap
+        let bottom: CGFloat = (style.presentation.showControls ? 38 : 0) + 14
+        textViewport.frame = NSRect(x: 20, y: bottom, width: width, height: max(0, top - bottom))
+        textViewport.fitDocument(height: total)
+        let documentHeight = textViewport.textDocument.bounds.height
+        current.frame = NSRect(x: 0, y: documentHeight - first, width: width, height: first)
+        next.frame = NSRect(x: 0, y: documentHeight - total, width: width, height: second)
         controls.frame = NSRect(x: (bounds.width - 144) / 2, y: 10, width: 144, height: 32)
         progressTrack.frame = NSRect(x: 24, y: 3, width: max(0, bounds.width - 48), height: 2)
         progress.frame = NSRect(x: 24, y: 3, width: max(0, bounds.width - 48) * fraction, height: 2)

@@ -13,6 +13,8 @@ final class WallpaperView: NSView {
 final class PreviewScene: NSView {
     let lyrics = LyricsView(frame: .zero, desktop: false)
     private let wallpaper = WallpaperView()
+    var onPreferredHeightChange: (() -> Void)?
+    var preferredHeight: CGFloat { min(400, lyrics.height(fittingWidth: max(1, bounds.width - 36)) + 24) }
     override init(frame: NSRect) {
         super.init(frame: frame)
         wantsLayer = true
@@ -20,6 +22,7 @@ final class PreviewScene: NSView {
         layer?.masksToBounds = true
         addSubview(wallpaper)
         addSubview(lyrics)
+        lyrics.onPreferredHeightChange = { [weak self] in self?.onPreferredHeightChange?() }
         setLanguage(0)
     }
     required init?(coder: NSCoder) { fatalError() }
@@ -31,6 +34,7 @@ final class PreviewScene: NSView {
         super.layout()
         wallpaper.frame = bounds
         lyrics.frame = bounds.insetBy(dx: 18, dy: 12)
+        onPreferredHeightChange?()
     }
 }
 

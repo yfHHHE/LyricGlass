@@ -14,6 +14,7 @@ final class LyricsPanel: NSPanel {
         isReleasedWhenClosed = false
         isMovableByWindowBackground = true
         contentView = lyricsView
+        lyricsView.onPreferredHeightChange = { [weak self] in self?.resizeForLyrics() }
         apply(LyricsAppearance())
         centerAtBottom()
     }
@@ -28,7 +29,7 @@ final class LyricsPanel: NSPanel {
         let visible = (screen ?? NSScreen.screens.first)?.visibleFrame
         frame.size.width = min(style.presentation.desktopWidth, max(1, (visible?.width ?? 980) - 40))
         frame.origin.x = center - frame.width / 2
-        frame.size.height = lyricsView.preferredHeight
+        frame.size.height = min(lyricsView.height(fittingWidth: frame.width), max(1, (visible?.height ?? 900) - 16))
         if let visible {
             frame.origin.x = min(visible.maxX - frame.width, max(visible.minX, frame.minX))
             frame.origin.y = min(visible.maxY - frame.height, max(visible.minY, frame.minY))
@@ -39,13 +40,22 @@ final class LyricsPanel: NSPanel {
         if style.clickThrough { lyricsView.setHovered(false) }
     }
 
+    private func resizeForLyrics() {
+        var frame = self.frame
+        let visible = (screen ?? NSScreen.screens.first)?.visibleFrame
+        frame.size.height = min(lyricsView.height(fittingWidth: frame.width), max(1, (visible?.height ?? 900) - 16))
+        if let visible { frame.origin.y = min(visible.maxY - frame.height, max(visible.minY, frame.minY)) }
+        if self.frame != frame { setFrame(frame, display: true) }
+    }
+
     func centerAtBottom() {
         // Keep reopened lyrics discoverable on multi-monitor Macs.
         guard let screen = NSScreen.screens.first ?? NSScreen.main else { return }
         let visible = screen.visibleFrame
         let width = min(lyricsView.preferredWidth, visible.width - 40)
-        setFrame(NSRect(x: visible.midX - width / 2, y: visible.minY + 44,
-                        width: width, height: lyricsView.preferredHeight), display: true)
+        let height = min(lyricsView.height(fittingWidth: width), max(1, visible.height - 16))
+        setFrame(NSRect(x: visible.midX - width / 2, y: min(visible.minY + 44, visible.maxY - height),
+                        width: width, height: height), display: true)
     }
 }
 
@@ -56,12 +66,16 @@ final class LyricsView: NSView {
     let effect = NSVisualEffectView()
     let pet = RaindropPetView(frame: .zero)
     let controls = PlaybackControls()
+    let textViewport = LyricsTextViewport()
     private let tint = NSView()
     private let hoverTint = NSView()
     private let detail = NSTextField(labelWithString: "")
     private var tracking: NSTrackingArea?
     private var hovered = false
     private var style = LyricsAppearance()
+    private var measuredWidth: CGFloat = -1
+    private var measuredHeights: (CGFloat, CGFloat) = (0, 0)
+    var onPreferredHeightChange: (() -> Void)?
     var onContextMenu: ((NSEvent, NSView) -> Void)?
     var onPlaybackAction: ((SettingsAction) -> Void)? {
         didSet { controls.onAction = onPlaybackAction }
@@ -75,13 +89,15 @@ final class LyricsView: NSView {
         effect.material = .hudWindow
         effect.state = .active
         for view in [tint, hoverTint] { view.wantsLayer = true }
-        for view in [effect, tint, hoverTint, pet, current, next, detail, controls] { addSubview(view) }
+        for view in [effect, tint, hoverTint, pet, textViewport, detail, controls] { addSubview(view) }
+        for label in [current, next] { textViewport.textDocument.addSubview(label) }
         for label in [current, next, detail] {
             label.alignment = .center
             label.lineBreakMode = .byTruncatingTail
             label.maximumNumberOfLines = 1
             label.isSelectable = false
         }
+        for label in [current, next] { LyricsTypography.configureWrapping(label) }
         detail.font = .systemFont(ofSize: 11, weight: .medium)
         detail.isHidden = true
         setAccessibilityElement(true)
@@ -91,13 +107,24 @@ final class LyricsView: NSView {
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    private var currentHeight: CGFloat { LyricsTypography.lineHeight(style: style, size: style.primarySize, bold: style.bold) }
-    private var nextHeight: CGFloat { LyricsTypography.lineHeight(style: style, size: style.secondarySize, bold: false) }
-    private var textHeight: CGFloat { currentHeight + (style.presentation.showNextLine ? nextHeight + style.lineGap : 0) }
+    private func textHeights(width: CGFloat) -> (CGFloat, CGFloat) {
+        if measuredWidth != width {
+            let available = max(1, width - style.padding * 2 - (style.petEnabled ? 110 : 0))
+            measuredHeights = (
+                LyricsTypography.wrappedHeight(current, width: available, minimum: LyricsTypography.lineHeight(style: style, size: style.primarySize, bold: style.bold)),
+                style.presentation.showNextLine ? LyricsTypography.wrappedHeight(next, width: available, minimum: LyricsTypography.lineHeight(style: style, size: style.secondarySize, bold: false)) : 0)
+            measuredWidth = width
+        }
+        return measuredHeights
+    }
     private var controlsHeight: CGFloat { style.presentation.showControls ? 34 : 0 }
     var preferredWidth: CGFloat { style.presentation.desktopWidth }
-    var preferredHeight: CGFloat { max(style.petEnabled ? 150 : 100, textHeight + 58 + controlsHeight) }
-    var preferredPreviewHeight: CGFloat { textHeight + 40 + controlsHeight }
+    func height(fittingWidth width: CGFloat) -> CGFloat {
+        let (first, second) = textHeights(width: width)
+        return max(style.petEnabled ? 150 : 100, first + second + (style.presentation.showNextLine ? style.lineGap : 0) + 58 + controlsHeight)
+    }
+    var preferredHeight: CGFloat { height(fittingWidth: bounds.width > 0 ? bounds.width : preferredWidth) }
+    var preferredPreviewHeight: CGFloat { preferredHeight + 24 }
 
     func updatePlayback(playing: Bool, enabled: Bool) {
         controls.update(playing: playing, enabled: enabled, color: NSColor(hex: style.primaryColor))
@@ -110,11 +137,15 @@ final class LyricsView: NSView {
         label.font = style.englishFont.font(size: size, bold: primary && style.bold)
         label.textColor = color
         label.attributedStringValue = LyricsTypography.attributedText(text, style: style, size: size, bold: primary && style.bold, color: color)
+        measuredWidth = -1
+        textViewport.resetPosition()
     }
     func show(current text: String, next upcoming: String, detail info: String) {
+        let changed = current.stringValue != text || next.stringValue != upcoming
         if current.stringValue != text { updateText(current, text: text) }
         if next.stringValue != upcoming { updateText(next, text: upcoming) }
         if detail.stringValue != info { detail.stringValue = info }
+        if changed { needsLayout = true; onPreferredHeightChange?() }
     }
 
     func apply(_ value: LyricsAppearance) {
@@ -144,20 +175,23 @@ final class LyricsView: NSView {
 
     override func layout() {
         super.layout()
+        guard bounds.width > 0, bounds.height > 0 else { return }
         effect.frame = bounds
         tint.frame = bounds
         hoverTint.frame = bounds
-        let firstHeight = currentHeight, nextHeight = style.presentation.showNextLine ? self.nextHeight : 0
+        let (firstHeight, nextHeight) = textHeights(width: bounds.width)
         let gap = style.presentation.showNextLine ? style.lineGap : 0
         let total = firstHeight + nextHeight + gap
-        let bottom = max(8, (bounds.height - controlsHeight - total - 20) / 2) + controlsHeight
-        let petSize = min(100, max(64, bounds.height - 36))
+        textViewport.frame = NSRect(x: 0, y: controlsHeight + 12, width: bounds.width, height: max(0, bounds.height - controlsHeight - 48))
+        textViewport.fitDocument(height: total)
+        let bottom = max(0, (textViewport.textDocument.bounds.height - total) / 2)
+        let petSize: CGFloat = 100
         let reserved = style.petEnabled ? petSize + 10 : 0
         pet.frame = NSRect(x: style.padding - 4, y: (bounds.height - petSize) / 2 - 2, width: petSize, height: petSize)
         let width = max(0, bounds.width - style.padding * 2 - reserved)
         current.frame = NSRect(x: style.padding + reserved, y: bottom + nextHeight + gap, width: width, height: firstHeight)
         next.frame = NSRect(x: style.padding + reserved, y: bottom, width: width, height: nextHeight)
-        detail.frame = NSRect(x: 18, y: current.frame.maxY + 8, width: max(0, bounds.width - 36), height: 18)
+        detail.frame = NSRect(x: 18, y: bounds.height - 26, width: max(0, bounds.width - 36), height: 18)
         controls.frame = NSRect(x: (bounds.width - 144) / 2, y: 6, width: 144, height: 32)
     }
 
