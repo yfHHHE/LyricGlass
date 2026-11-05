@@ -17,9 +17,11 @@ func verify() throws {
     let store = AppearanceStore(defaults: defaults)
     _ = AppearanceStore().load() // Real startup path: never construct a suite from the app's own bundle ID.
     try registerAppearanceFonts()
+    try verifyIslandControlBindings()
     try verifyWrapping()
     try verifyCompactLayouts()
     try verifyReadingLayouts()
+    try verifyNotchLayouts()
     let panel = LyricsPanel()
     panel.lyricsView.show(current: "Let the melody stay", next: "让文字跟着时间", detail: "Check")
     var changed = 0
@@ -35,11 +37,31 @@ func verify() throws {
     let disclosure = descendants(settings.root).compactMap { $0 as? NSButton }.first { $0.title == "更多外观选项" }!
     disclosure.state = .on; try send(disclosure)
     let views = descendants(settings.root)
-    let display = views.compactMap { $0 as? NSPopUpButton }.first { $0.accessibilityLabel() == "歌词显示方式" }!
+    let desktopToggle = views.compactMap { $0 as? NSSwitch }.first { $0.accessibilityLabel() == "显示桌面悬浮" }!
+    let islandToggle = views.compactMap { $0 as? NSSwitch }.first { $0.accessibilityLabel() == "显示灵动岛" }!
     try require(store.load().presentation.mode == .both, "Default must retain desktop lyrics alongside the island")
-    display.selectItem(at: 2); try send(display)
-    try require(store.load().presentation.mode == .island, "Display mode must save independently of typography")
-    display.selectItem(at: 0); try send(display)
+    let navigation = views.compactMap { $0 as? SettingsSidebarButton }
+    try require(navigation.map(\.title) == ["桌面悬浮", "灵动岛", "文字与字体", "雨滴", "播放与歌词", "关于"], "Settings must separate the two displays, shared typography, companion and playback pages")
+    settings.showPage(.desktop)
+    try require(!desktopToggle.isHiddenOrHasHiddenAncestor && islandToggle.isHiddenOrHasHiddenAncestor, "Desktop page must expose only its own display switch")
+    desktopToggle.state = .off; try send(desktopToggle)
+    try require(store.load().presentation.mode == .island && islandToggle.state == .on, "Turning desktop off must preserve the island")
+    settings.showPage(.island)
+    try require(desktopToggle.isHiddenOrHasHiddenAncestor && !islandToggle.isHiddenOrHasHiddenAncestor, "Island page must expose its own switch")
+    islandToggle.state = .off; try send(islandToggle)
+    try require(store.load().presentation.mode == .hidden && !store.load().presentation.desktopEnabled && !store.load().presentation.islandEnabled, "Both displays must be independently switchable off and remain off after saving")
+    let restarted = AppearanceSettings(style: store.load(), onChange: { _ in }, onRecenter: {})
+    let restoredSwitches = descendants(restarted.root).compactMap { $0 as? NSSwitch }.filter { ["显示桌面悬浮", "显示灵动岛"].contains($0.accessibilityLabel() ?? "") }
+    try require(restoredSwitches.count == 2 && restoredSwitches.allSatisfy { $0.state == .off }, "Reopening settings must preserve both-off mode without resetting it")
+    desktopToggle.state = .on; try send(desktopToggle)
+    try require(store.load().presentation.mode == .desktop && islandToggle.state == .off, "Turning desktop back on must leave island off")
+    islandToggle.state = .on; try send(islandToggle)
+    try require(store.load().presentation.mode == .both, "Both switches must be able to restore the original display mode")
+    for page in SettingsPage.allCases {
+        navigation[page.rawValue].performClick(nil)
+        try require(settings.selectedPage == page, "Every settings page must be reachable from the native sidebar")
+    }
+    print("PASS settings sections and independent display switches: six pages, all four states, reopen persistence and unchanged layout settings")
     let gap = views.compactMap { $0 as? NSSlider }.first { $0.tag == 5 }!
     gap.doubleValue = 48; try send(gap)
     panel.lyricsView.layoutSubtreeIfNeeded()
@@ -66,7 +88,7 @@ func verify() throws {
     let notched = IslandGeometry(screenFrame: NSRect(x: -1440, y: 200, width: 1440, height: 900), topInset: 32, notchWidth: 200)
     let compactFrame = notched.frame(expanded: false, width: 480, height: 180)
     let expandedFrame = notched.frame(expanded: true, width: 480, height: 180)
-    try require(compactFrame.midX == expandedFrame.midX && compactFrame.maxY == expandedFrame.maxY && expandedFrame.maxY == 1100, "Notched and offset monitors must share a stable expansion anchor")
+    try require(expandedFrame.midX == notched.notchCenterX && expandedFrame.contains(compactFrame) && compactFrame.maxY == expandedFrame.maxY && expandedFrame.maxY == 1100, "Expanded notch windows must center on the camera while containing the asymmetric compact bar")
     island.islandView.geometry = notched
     island.setFrame(NSRect(x: 0, y: 0, width: 480, height: island.islandView.expandedHeight), display: true)
     island.islandView.layoutSubtreeIfNeeded()
@@ -275,7 +297,9 @@ if CommandLine.arguments.count == 4 && CommandLine.arguments[1] == "--verify-sto
 } else {
     _ = NSApplication.shared
     do {
-        if let index = CommandLine.arguments.firstIndex(of: "--reading-snapshots"), index + 1 < CommandLine.arguments.count {
+        if let index = CommandLine.arguments.firstIndex(of: "--notch-layout-snapshots"), index + 1 < CommandLine.arguments.count {
+            try exportNotchPreviews(to: URL(fileURLWithPath: CommandLine.arguments[index + 1], isDirectory: true))
+        } else if let index = CommandLine.arguments.firstIndex(of: "--reading-snapshots"), index + 1 < CommandLine.arguments.count {
             try exportReadingPreviews(to: URL(fileURLWithPath: CommandLine.arguments[index + 1], isDirectory: true))
         } else if let index = CommandLine.arguments.firstIndex(of: "--compact-snapshots"), index + 1 < CommandLine.arguments.count {
             try exportCompactPreviews(to: URL(fileURLWithPath: CommandLine.arguments[index + 1], isDirectory: true))
@@ -309,7 +333,8 @@ if CommandLine.arguments.count == 4 && CommandLine.arguments[1] == "--verify-sto
             if CommandLine.arguments.contains("--font-pair") { style.chineseFont = .wenkai; style.englishFont = .openDyslexic }
             let settings = AppearanceSettings(style: style, onChange: { _ in }, onRecenter: {})
             if CommandLine.arguments.contains("--dark") { settings.window.appearance = NSAppearance(named: .darkAqua) }
-            settings.showWindow(page: petPage ? .pet : CommandLine.arguments.contains("--playback") ? .playback : .appearance)
+            let selected: SettingsPage = petPage ? .pet : (CommandLine.arguments.contains("--playback") ? .playback : (CommandLine.arguments.contains("--island") ? .island : (CommandLine.arguments.contains("--typography") ? .typography : .desktop)))
+            settings.showWindow(page: selected)
             RunLoop.main.run(until: Date().addingTimeInterval(0.4))
             settings.window.contentView?.layoutSubtreeIfNeeded()
             settings.window.displayIfNeeded()

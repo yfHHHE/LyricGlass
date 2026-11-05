@@ -276,17 +276,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return item
     }
 
-    private func makeMenu() { quickMenu.update(visible: lyricsVisible, locked: panel.ignoresMouseEvents) }
+    private func makeMenu() {
+        quickMenu.update(visible: lyricsVisible && appearance.presentation.mode != .hidden, locked: panel.ignoresMouseEvents)
+    }
 
     private func updateVisibility() {
         if lyricsVisible && appearance.presentation.mode.showsDesktop { panel?.orderFrontRegardless() } else { panel?.orderOut(nil) }
         if lyricsVisible && appearance.presentation.mode.showsIsland { island?.orderFrontRegardless() } else { island?.orderOut(nil) }
     }
-    @objc private func toggleVisible() { lyricsVisible.toggle(); updateVisibility() }
+    @objc private func toggleVisible() {
+        if appearance.presentation.mode == .hidden {
+            var value = appearance; value.presentation.mode = .both
+            lyricsVisible = true; setAppearance(value)
+        } else { lyricsVisible.toggle(); updateVisibility() }
+    }
     @objc private func toggleLock() { var value = appearance; value.clickThrough.toggle(); setAppearance(value) }
     @objc private func recenter() { panel.centerAtBottom(); island.reposition(); lyricsVisible = true; updateVisibility() }
     private func setAppearance(_ value: LyricsAppearance) {
-        appearance = value.normalized()
+        let updated = value.normalized()
+        if (!appearance.presentation.desktopEnabled && updated.presentation.desktopEnabled)
+            || (!appearance.presentation.islandEnabled && updated.presentation.islandEnabled) { lyricsVisible = true }
+        appearance = updated
         if !appearance.petEnabled || appearance.petMotion != .audio { petAudioArmed = false; petAudio.stop() }
         appearanceStore.save(appearance)
         panel.apply(appearance)

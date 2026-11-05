@@ -1,9 +1,9 @@
 import Foundation
 
 enum SettingsPage: Int, CaseIterable {
-    case appearance, pet, playback, about
-    var title: String { ["外观", "雨滴", "播放与歌词", "关于"][rawValue] }
-    var symbol: String { ["paintpalette", "drop", "waveform", "info.circle"][rawValue] }
+    case desktop, island, typography, pet, playback, about
+    var title: String { ["桌面悬浮", "灵动岛", "文字与字体", "雨滴", "播放与歌词", "关于"][rawValue] }
+    var symbol: String { ["rectangle.on.rectangle", "capsule", "textformat", "drop", "waveform", "info.circle"][rawValue] }
 }
 
 enum SettingsAction: Int, CaseIterable {

@@ -137,12 +137,20 @@ enum FontChoice: String, Codable, CaseIterable {
 }
 
 enum LyricsDisplayMode: String, Codable, CaseIterable {
-    case both, desktop, island
+    case both, desktop, island, hidden
     var title: String {
-        switch self { case .both: return "桌面歌词与灵动岛"; case .desktop: return "仅桌面歌词"; case .island: return "仅灵动岛" }
+        switch self { case .both: return "桌面歌词与灵动岛"; case .desktop: return "仅桌面歌词"; case .island: return "仅灵动岛"; case .hidden: return "全部关闭" }
     }
-    var showsDesktop: Bool { self != .island }
-    var showsIsland: Bool { self != .desktop }
+    init(desktop: Bool, island: Bool) {
+        switch (desktop, island) {
+        case (true, true): self = .both
+        case (true, false): self = .desktop
+        case (false, true): self = .island
+        case (false, false): self = .hidden
+        }
+    }
+    var showsDesktop: Bool { self == .both || self == .desktop }
+    var showsIsland: Bool { self == .both || self == .island }
 }
 
 enum IslandShape: String, Codable, CaseIterable {
@@ -151,18 +159,24 @@ enum IslandShape: String, Codable, CaseIterable {
         switch self { case .capsule: return "胶囊"; case .roundedRectangle: return "圆角长方形"; case .rectangle: return "长方形" }
     }
     func radius(height: CGFloat, expanded: Bool) -> CGFloat {
-        if !expanded { return height / 2 }
-        switch self { case .capsule: return min(22, height / 2); case .roundedRectangle: return 6; case .rectangle: return 0 }
+        if expanded { return min(18, height / 2) }
+        switch self { case .capsule: return height / 2; case .roundedRectangle: return min(8, height / 2); case .rectangle: return 0 }
     }
 }
 
 struct IslandAppearance: Codable, Equatable {
+    // The container and clipped lyric viewport have independent widths.
     var compactWidth = 420.0
     var compactHeight = 24.0
     var expandedMaxHeight = 320.0
     var topOffset = 0.0
     var shape: IslandShape = .capsule
     private var expandedRows: Int?
+    private var leftLyricWidth: Double?
+    var compactLyricWidth: Double {
+        get { leftLyricWidth ?? 160 }
+        set { leftLyricWidth = newValue }
+    }
     var expandedLineCount: Int {
         get { expandedRows == 5 ? 5 : 2 }
         set { expandedRows = newValue == 5 ? 5 : 2 }
@@ -176,6 +190,14 @@ struct LyricsPresentation: Codable, Equatable {
         set { islandOptions = newValue }
     }
     var mode: LyricsDisplayMode = .both
+    var desktopEnabled: Bool {
+        get { mode.showsDesktop }
+        set { mode = LyricsDisplayMode(desktop: newValue, island: mode.showsIsland) }
+    }
+    var islandEnabled: Bool {
+        get { mode.showsIsland }
+        set { mode = LyricsDisplayMode(desktop: mode.showsDesktop, island: newValue) }
+    }
     var desktopWidth = 940.0
     var islandWidth = 560.0
     var showNextLine = true
@@ -289,12 +311,12 @@ extension LyricsAppearance {
         presentation.islandWidth = presentation.islandWidth.isFinite ? min(1000, max(320, presentation.islandWidth)) : 560
         var island = presentation.islandAppearance
         island.compactWidth = island.compactWidth.isFinite ? min(1000, max(180, island.compactWidth)) : 420
+        island.compactLyricWidth = island.compactLyricWidth.isFinite ? min(360, max(100, island.compactLyricWidth)) : 160
         // Restore the original capsule, including settings saved by the brief
         // two-line-as-collapsed implementation in v0.6.3.
         island.compactHeight = island.compactHeight.isFinite && island.compactHeight <= 64 ? max(18, island.compactHeight) : 24
         island.expandedMaxHeight = island.expandedMaxHeight.isFinite ? min(720, max(160, island.expandedMaxHeight)) : 320
         island.topOffset = island.topOffset.isFinite ? min(80, max(0, island.topOffset)) : 0
-        presentation.islandWidth = max(presentation.islandWidth, island.compactWidth)
         presentation.islandAppearance = island
         value.presentation = presentation
         value.petEnabled = petEnabled

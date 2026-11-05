@@ -25,25 +25,24 @@ public struct LyricsDiskCache: Sendable {
         // including a player's transient ID in the recording identity.
         let candidates = [0, -1, 1, -2, 2].compactMap { try? file(for: song, secondsOffset: $0) }
         for url in candidates {
-            if let record = read(url, song: song, now: now, legacyOnly: false) { return record }
+            if let record = read(url, song: song, now: now) { return record }
         }
-        // v0.4 hashes the entire Song including the player ID. Read those entries
-        // without deleting them or extending their original 30-day expiry.
-        for url in ((try? managedFiles()) ?? []).prefix(200) where !candidates.contains(url) {
-            if let record = read(url, song: song, now: now, legacyOnly: true) { return record }
-        }
-        return nil
+        // Cross-player albums and release labels may use a different key. Recheck the
+        // bounded cache against actual recording metadata, preserving the original expiry.
+        return ((try? managedFiles()) ?? []).prefix(200).filter { !candidates.contains($0) }
+            .compactMap { read($0, song: song, now: now) }
+            .max { (SongMatcher.score($0, song: song) ?? 0) < (SongMatcher.score($1, song: song) ?? 0) }
     }
 
-    private func read(_ url: URL, song: Song, now: Date, legacyOnly: Bool) -> LyricsRecord? {
+    private func read(_ url: URL, song: Song, now: Date) -> LyricsRecord? {
         guard let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize, size <= 512_000,
               let data = try? Data(contentsOf: url, options: .mappedIfSafe), data.count <= 512_000,
               let entry = try? JSONDecoder().decode(Entry.self, from: data),
-              entry.schema == 1 || (!legacyOnly && entry.schema == 2),
-              entry.song.duration.isFinite, abs(entry.song.duration - song.duration) <= 2,
+              entry.schema == 1 || entry.schema == 2,
+              entry.song.duration.isFinite, abs(entry.song.duration - song.duration) <= SongMatcher.durationTolerance(song.duration),
               SongMatcher.titleKey(entry.song.title) == SongMatcher.titleKey(song.title),
-              ArtistNames.parts(entry.song.artist).sorted() == ArtistNames.parts(song.artist).sorted(),
-              LyricsProvider.normalized(entry.song.album) == LyricsProvider.normalized(song.album),
+              LyricsProvider.matches(LyricsRecord(trackName: entry.song.title, artistName: entry.song.artist,
+                  albumName: entry.song.album, duration: entry.song.duration), song: song),
               entry.savedAt <= now.addingTimeInterval(60), now.timeIntervalSince(entry.savedAt) < lifetime,
               LyricsProvider.matches(entry.record, song: entry.song), LyricsProvider.matches(entry.record, song: song),
               entry.record.hasSyncedLyrics else { return nil }

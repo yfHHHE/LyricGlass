@@ -13,10 +13,10 @@ final class AppearanceSettings: NSObject, NSWindowDelegate, NSTextFieldDelegate 
     let root = SettingsSurfaceView(frame: NSRect(x: 0, y: 0, width: 860, height: 760))
     private let content = NSView()
     private let header = NSView()
-    private let headerTitle = NSTextField(labelWithString: "外观")
+    private let headerTitle = NSTextField(labelWithString: "桌面悬浮")
     private var pages: [NSScrollView] = []
     private var navigation: [SettingsSidebarButton] = []
-    private(set) var selectedPage: SettingsPage = .appearance
+    private(set) var selectedPage: SettingsPage = .desktop
     private let chineseFont = NSPopUpButton()
     private let englishFont = NSPopUpButton()
     private var chineseFontWidth: NSLayoutConstraint!
@@ -31,7 +31,8 @@ final class AppearanceSettings: NSObject, NSWindowDelegate, NSTextFieldDelegate 
     private let shadow = NSSwitch()
     private let top = NSSwitch()
     private let passthrough = NSSwitch()
-    private let displayMode = NSPopUpButton()
+    private let desktopEnabled = NSSwitch()
+    private let islandEnabled = NSSwitch()
     private let showNextLine = NSSwitch()
     private let showPlaybackControls = NSSwitch()
     private let islandPinned = NSSwitch()
@@ -59,6 +60,7 @@ final class AppearanceSettings: NSObject, NSWindowDelegate, NSTextFieldDelegate 
     private var wells: [Int: NSColorWell] = [:]
     private var hexFields: [Int: NSTextField] = [:]
     private var previewHeight: NSLayoutConstraint!
+    private var screenObserver: NSObjectProtocol?
 
     init(style: LyricsAppearance, onChange: @escaping (LyricsAppearance) -> Void, onRecenter: @escaping () -> Void,
          onPlayer: @escaping (Int) -> Void = { _ in }, onAction: @escaping (SettingsAction) -> Void = { _ in }) {
@@ -78,6 +80,8 @@ final class AppearanceSettings: NSObject, NSWindowDelegate, NSTextFieldDelegate 
         syncControls()
         apply(save: false)
         updatePlayback(SettingsPlaybackState())
+        screenObserver = NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification,
+            object: nil, queue: .main) { [weak self] _ in self?.syncControls() }
         petTimer = Timer(timeInterval: 0.05, repeats: true) { [weak self] _ in
             guard let self, self.window.isVisible, self.selectedPage == .pet else { return }
             // Settings preview never starts audio recording; it demonstrates motion only.
@@ -86,7 +90,10 @@ final class AppearanceSettings: NSObject, NSWindowDelegate, NSTextFieldDelegate 
         }
         RunLoop.main.add(petTimer!, forMode: .common)
     }
-    deinit { petTimer?.invalidate() }
+    deinit {
+        petTimer?.invalidate()
+        if let screenObserver { NotificationCenter.default.removeObserver(screenObserver) }
+    }
     func update(_ value: LyricsAppearance) { style = value.normalized(); syncControls(); apply(save: false) }
     func updatePetAudioStatus(_ text: String) {
         if petAudioStatus.stringValue != text { petAudioStatus.stringValue = text }
@@ -282,6 +289,11 @@ final class AppearanceSettings: NSObject, NSWindowDelegate, NSTextFieldDelegate 
         let nav = stack([], vertical: true, spacing: 7); nav.translatesAutoresizingMaskIntoConstraints = false; sidebar.addSubview(nav)
         NSLayoutConstraint.activate([nav.leadingAnchor.constraint(equalTo: sidebar.leadingAnchor, constant: 14), nav.trailingAnchor.constraint(equalTo: sidebar.trailingAnchor, constant: -14), nav.topAnchor.constraint(equalTo: brand.bottomAnchor, constant: 22)])
         for page in SettingsPage.allCases {
+            if page == .desktop || page == .typography {
+                let group = stack([label(page == .desktop ? "显示" : "通用", size: 10, color: SettingsPalette.muted)], spacing: 0)
+                group.edgeInsets = NSEdgeInsets(top: page == .desktop ? 0 : 12, left: 12, bottom: 3, right: 0)
+                fullWidth(group, in: nav)
+            }
             let button = SettingsSidebarButton(title: page.title, target: self, action: #selector(navigate(_:)))
             button.tag = page.rawValue
             button.image = NSImage(systemSymbolName: page.symbol, accessibilityDescription: nil)?.withSymbolConfiguration(.init(pointSize: 13, weight: .regular))
@@ -293,12 +305,15 @@ final class AppearanceSettings: NSObject, NSWindowDelegate, NSTextFieldDelegate 
         let footer = label(version.isEmpty ? "LyricGlass" : "LyricGlass  ·  \(version)", size: 10, color: SettingsPalette.muted)
         footer.translatesAutoresizingMaskIntoConstraints = false; sidebar.addSubview(footer)
         NSLayoutConstraint.activate([footer.leadingAnchor.constraint(equalTo: sidebar.leadingAnchor, constant: 16), footer.bottomAnchor.constraint(equalTo: sidebar.bottomAnchor, constant: -18)])
-        makeAppearancePage(); makePetPage(); makePlaybackPage(); makeAboutPage()
+        makeDesktopPage(); makeIslandPage(); makeTypographyPage(); makePetPage(); makePlaybackPage(); makeAboutPage()
         NSColorPanel.shared.isContinuous = true; NSColorPanel.shared.showsAlpha = false
-        showPage(.appearance)
+        showPage(.desktop)
     }
-    private func makeAppearancePage() {
+    private func makeDesktopPage() {
         let body = page()
+        desktopEnabled.target = self; desktopEnabled.action = #selector(displayVisibilityChanged(_:))
+        desktopEnabled.setAccessibilityLabel("显示桌面悬浮")
+        fullWidth(section("", rows: [row("显示桌面悬浮", desktopEnabled, height: 56)]), in: body)
         let language = NSSegmentedControl(labels: ["中英", "中文", "English"], trackingMode: .selectOne, target: self, action: #selector(languageChanged(_:)))
         language.selectedSegment = 0; SettingsNativeControls.segments(language); language.controlSize = .small
         language.widthAnchor.constraint(equalToConstant: 164).isActive = true
@@ -311,82 +326,99 @@ final class AppearanceSettings: NSObject, NSWindowDelegate, NSTextFieldDelegate 
             if abs(self.previewHeight.constant - height) > 0.5 { self.previewHeight.constant = height }
         }
         fullWidth(scene, in: preview); fullWidth(preview, in: body)
-        displayMode.addItems(withTitles: LyricsDisplayMode.allCases.map(\.title))
-        displayMode.target = self; displayMode.action = #selector(presentationChanged(_:))
-        displayMode.setAccessibilityLabel("歌词显示方式"); SettingsNativeControls.button(displayMode)
-        displayMode.widthAnchor.constraint(equalToConstant: 210).isActive = true
-        for (control, name) in [(showNextLine, "显示下一句歌词"), (showPlaybackControls, "显示播放按钮"), (islandPinned, "灵动岛保持展开")] {
-            control.target = self; control.action = #selector(presentationChanged(_:)); control.setAccessibilityLabel(name)
-        }
-        showPlaybackControls.toolTip = "桌面按钮在悬停时显示；顶部展开为两行时位于标题栏，五行时位于右侧"
-        showNextLine.toolTip = "影响桌面歌词与顶部展开的两行布局；五行模式显示完整上下文"
-        fullWidth(section("显示方式", rows: [row("显示位置", displayMode), row("显示下一句", showNextLine), row("显示播放按钮", showPlaybackControls)]), in: body)
-        reloadFontMenu()
-        let refresh = NSButton(title: "刷新字体", target: self, action: #selector(refreshFonts))
-        SettingsNativeControls.button(refresh)
-        refresh.toolTip = "安装字体后刷新"
-        for (picker, name) in [(chineseFont, "中文字体"), (englishFont, "英文字体")] {
-            picker.target = self; picker.action = #selector(fontChanged(_:)); SettingsNativeControls.button(picker)
-            picker.alignment = .right
-            picker.setAccessibilityLabel(name)
-            picker.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        }
-        chineseFontWidth = chineseFont.widthAnchor.constraint(equalToConstant: 100)
-        englishFontWidth = englishFont.widthAnchor.constraint(equalToConstant: 100)
-        NSLayoutConstraint.activate([chineseFontWidth, englishFontWidth])
         presets.target = self; presets.action = #selector(presetChanged(_:)); SettingsNativeControls.segments(presets)
         presets.widthAnchor.constraint(equalToConstant: 270).isActive = true
         background.target = self; background.action = #selector(backgroundChanged(_:)); SettingsNativeControls.segments(background)
         background.widthAnchor.constraint(equalToConstant: 216).isActive = true
         theme.addItems(withTitles: ["跟随系统", "深色玻璃", "浅色玻璃"]); theme.target = self; theme.action = #selector(themeChanged(_:)); SettingsNativeControls.button(theme)
         theme.widthAnchor.constraint(equalToConstant: 200).isActive = true
-        for (control, name) in [(bold, "当前句加粗"), (shadow, "文字阴影"), (top, "歌词置顶"), (passthrough, "鼠标穿透")] {
+        for (control, name) in [(shadow, "文字阴影"), (top, "歌词置顶"), (passthrough, "鼠标穿透")] {
             control.target = self; control.action = #selector(togglesChanged(_:)); control.controlSize = .regular; control.setAccessibilityLabel(name)
         }
-        fullWidth(section("文字", rows: [
-            row("中文字体", chineseFont), row("英文字体", englishFont),
-            slider("当前句字号", tag: 0, minimum: 16, maximum: 64),
-            slider("下一句字号", tag: 1, minimum: 12, maximum: 48),
-            slider("两句歌词间距", tag: 5, minimum: 0, maximum: 64),
+        fullWidth(section("颜色", rows: [
             row("颜色", stack([colorTile("当前句", tag: 0), colorTile("下一句", tag: 1), colorTile("背景", tag: 2)], spacing: 18), height: 68)
         ]), in: body)
         glassHint.font = .systemFont(ofSize: 12); glassHint.textColor = SettingsPalette.muted
         fullWidth(section("背景", rows: [row("预设", presets), row("背景样式", background), row("毛玻璃外观", stack([theme, glassHint])), slider("不透明度", tag: 2, minimum: 0, maximum: 100)]), in: body)
         let restore = NSButton(title: "恢复主屏位置", target: self, action: #selector(restoreDesktop)); SettingsNativeControls.button(restore)
         passthrough.toolTip = "开启后仍可从菜单栏进入设置解除"
-        fullWidth(section("桌面窗口", rows: [slider("桌面歌词宽度", tag: 6, minimum: 480, maximum: 1400), row("始终置顶", top), row("鼠标穿透", passthrough), row("窗口位置", restore)]), in: body)
-        islandShape.addItems(withTitles: IslandShape.allCases.map(\.title))
-        islandShape.target = self; islandShape.action = #selector(presentationChanged(_:))
-        islandShape.alignment = .right
-        islandShape.setAccessibilityLabel("顶部窗口形状"); SettingsNativeControls.button(islandShape)
-        islandLines.target = self; islandLines.action = #selector(presentationChanged(_:))
-        islandLines.setAccessibilityLabel("顶部展开行数"); SettingsNativeControls.segments(islandLines)
-        islandLines.widthAnchor.constraint(equalToConstant: 140).isActive = true
-        fullWidth(section("顶部灵动岛", rows: [
-            row("展开行数", islandLines),
-            row("展开形状", islandShape),
-            slider("胶囊宽度", tag: 8, minimum: 180, maximum: 1000),
-            slider("胶囊高度", tag: 9, minimum: 18, maximum: 64),
-            slider("距屏幕顶部", tag: 11, minimum: 0, maximum: 80),
-            row("锁定展开", islandPinned),
-            slider("展开宽度", tag: 7, minimum: 320, maximum: 1000),
-            slider("展开最大高度", tag: 10, minimum: 160, maximum: 720)
-        ]), in: body)
-        fullWidth(label("收起为单行小胶囊；展开可选两行或五行，未锁定时移开鼠标自动收起", size: 11, color: SettingsPalette.muted), in: body)
+        fullWidth(section("布局", rows: [slider("桌面歌词宽度", tag: 6, minimum: 480, maximum: 1400),
+            slider("圆角", tag: 3, minimum: 0, maximum: 36), slider("左右留白", tag: 4, minimum: 12, maximum: 48)]), in: body)
+        fullWidth(section("窗口与交互", rows: [row("始终置顶", top), row("鼠标穿透", passthrough), row("文字阴影", shadow), row("窗口位置", restore)]), in: body)
         advancedButton.setButtonType(.onOff); advancedButton.isBordered = false; advancedButton.alignment = .left
         advancedButton.font = .systemFont(ofSize: 12); advancedButton.contentTintColor = SettingsPalette.secondary
         advancedButton.image = NSImage(systemSymbolName: "chevron.right", accessibilityDescription: nil)
         advancedButton.imagePosition = .imageLeading; advancedButton.imageHugsTitle = true
         advancedButton.target = self; advancedButton.action = #selector(toggleAdvanced(_:))
         fullWidth(advancedButton, in: body)
-        let fontBook = NSButton(title: "管理本机字体…", target: self, action: #selector(openFontBook)); SettingsNativeControls.button(fontBook)
-        advanced = section("", rows: [row("当前句加粗", bold), row("文字阴影", shadow),
-            slider("圆角", tag: 3, minimum: 0, maximum: 36), slider("左右留白", tag: 4, minimum: 12, maximum: 48),
-            row("当前句 HEX", hexFields[0]!), row("下一句 HEX", hexFields[1]!), row("背景 HEX", hexFields[2]!), row("本机字体", stack([fontBook, refresh]))])
+        advanced = section("颜色数值", rows: [row("当前句 HEX", hexFields[0]!), row("下一句 HEX", hexFields[1]!), row("背景 HEX", hexFields[2]!)])
         fullWidth(advanced, in: body); advanced.isHidden = true
+        fullWidth(label("字体、字号和两句间距在「文字与字体」中设置", size: 11, color: SettingsPalette.muted), in: body)
+    }
+    private func makeIslandPage() {
+        let body = page()
+        islandEnabled.target = self; islandEnabled.action = #selector(displayVisibilityChanged(_:))
+        islandEnabled.setAccessibilityLabel("显示灵动岛")
+        fullWidth(section("", rows: [row("显示灵动岛", islandEnabled, height: 56)]), in: body)
+        islandPinned.target = self; islandPinned.action = #selector(presentationChanged(_:))
+        islandPinned.setAccessibilityLabel("灵动岛保持展开")
+        islandShape.addItems(withTitles: IslandShape.allCases.map(\.title))
+        islandShape.target = self; islandShape.action = #selector(presentationChanged(_:))
+        islandShape.alignment = .right
+        islandShape.setAccessibilityLabel("胶囊形状"); SettingsNativeControls.button(islandShape)
+        islandLines.target = self; islandLines.action = #selector(presentationChanged(_:))
+        islandLines.setAccessibilityLabel("顶部展开行数"); SettingsNativeControls.segments(islandLines)
+        islandLines.widthAnchor.constraint(equalToConstant: 140).isActive = true
+        fullWidth(section("收起胶囊", rows: [
+            row("胶囊形状", islandShape),
+            slider("胶囊总宽度", tag: 8, minimum: 180, maximum: 1000),
+            slider("左侧歌词宽度", tag: 12, minimum: 100, maximum: 360),
+            slider("胶囊高度", tag: 9, minimum: 18, maximum: 64),
+            slider("距屏幕顶部", tag: 11, minimum: 0, maximum: 80)
+        ]), in: body)
+        let compactHint = NSTextField(wrappingLabelWithString: "总宽度控制黑色容器，歌词宽度只控制文字滚动区域；文字区域需容纳在胶囊与刘海安全范围内")
+        compactHint.font = .systemFont(ofSize: 11); compactHint.textColor = SettingsPalette.muted
+        fullWidth(compactHint, in: body)
+        fullWidth(section("展开阅读", rows: [
+            row("展开行数", islandLines),
+            row("锁定展开", islandPinned),
+            slider("展开宽度", tag: 7, minimum: 320, maximum: 1000),
+            slider("展开高度上限", tag: 10, minimum: 160, maximum: 720)
+        ]), in: body)
+        let expandedHint = NSTextField(wrappingLabelWithString: "展开居中，宽度至少覆盖收起区域；高度上限用于限制长歌词，不会强制拉高卡片")
+        expandedHint.font = .systemFont(ofSize: 11); expandedHint.textColor = SettingsPalette.muted
+        fullWidth(expandedHint, in: body)
+    }
+    private func makeTypographyPage() {
+        let body = page()
+        fullWidth(label("中文与英文独立选择，应用于桌面歌词和灵动岛展开阅读", size: 12, color: SettingsPalette.secondary), in: body)
+        reloadFontMenu()
+        for (picker, name) in [(chineseFont, "中文字体"), (englishFont, "英文字体")] {
+            picker.target = self; picker.action = #selector(fontChanged(_:)); SettingsNativeControls.button(picker)
+            picker.alignment = .right; picker.setAccessibilityLabel(name)
+            picker.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        }
+        chineseFontWidth = chineseFont.widthAnchor.constraint(equalToConstant: 100)
+        englishFontWidth = englishFont.widthAnchor.constraint(equalToConstant: 100)
+        NSLayoutConstraint.activate([chineseFontWidth, englishFontWidth])
+        bold.target = self; bold.action = #selector(togglesChanged(_:)); bold.setAccessibilityLabel("当前句加粗")
+        fullWidth(section("字体", rows: [row("中文字体", chineseFont), row("英文字体", englishFont)]), in: body)
+        fullWidth(section("字号与排版", rows: [
+            slider("当前句字号", tag: 0, minimum: 16, maximum: 64), slider("下一句字号", tag: 1, minimum: 12, maximum: 48),
+            slider("两句歌词间距", tag: 5, minimum: 0, maximum: 64), row("当前句加粗", bold)
+        ]), in: body)
+        for (control, name) in [(showNextLine, "显示下一句歌词"), (showPlaybackControls, "显示播放按钮")] {
+            control.target = self; control.action = #selector(presentationChanged(_:)); control.setAccessibilityLabel(name)
+        }
+        showNextLine.toolTip = "影响桌面歌词和灵动岛两行阅读；五行模式显示上下文"
+        showPlaybackControls.toolTip = "桌面播放按钮在悬停时显示；灵动岛展开后位于底部中央"
+        fullWidth(section("歌词展示", rows: [row("显示下一句", showNextLine), row("显示播放按钮", showPlaybackControls)]), in: body)
+        let fontBook = NSButton(title: "管理本机字体…", target: self, action: #selector(openFontBook)); SettingsNativeControls.button(fontBook)
+        let refresh = NSButton(title: "刷新字体", target: self, action: #selector(refreshFonts)); SettingsNativeControls.button(refresh)
+        fullWidth(section("本机字体", rows: [row("字体管理", stack([fontBook, refresh]))]), in: body)
         fontNote.font = .systemFont(ofSize: 11); fontNote.textColor = SettingsPalette.secondary; fontNote.maximumNumberOfLines = 3
         fullWidth(fontNote, in: body)
-        let reset = NSButton(title: "恢复默认", target: self, action: #selector(resetDefaults)); SettingsNativeControls.button(reset)
+        let reset = NSButton(title: "恢复所有默认设置", target: self, action: #selector(resetDefaults)); SettingsNativeControls.button(reset)
         fullWidth(stack([flexibleSpace(), reset]), in: body)
     }
     private func makePetPage() {
@@ -497,7 +529,8 @@ final class AppearanceSettings: NSObject, NSWindowDelegate, NSTextFieldDelegate 
         picker.toolTip = choice.label
     }
     private func syncControls() {
-        displayMode.selectItem(at: LyricsDisplayMode.allCases.firstIndex(of: style.presentation.mode) ?? 0)
+        desktopEnabled.state = style.presentation.desktopEnabled ? .on : .off
+        islandEnabled.state = style.presentation.islandEnabled ? .on : .off
         showNextLine.state = style.presentation.showNextLine ? .on : .off
         showPlaybackControls.state = style.presentation.showControls ? .on : .off
         islandPinned.state = style.presentation.islandPinned ? .on : .off
@@ -522,12 +555,32 @@ final class AppearanceSettings: NSObject, NSWindowDelegate, NSTextFieldDelegate 
         background.selectedSegment = BackgroundMode.allCases.firstIndex(of: style.background)!
         theme.selectItem(at: style.glassTheme)
         let island = style.presentation.islandAppearance
-        let numbers = [style.primarySize, style.secondarySize, style.opacity * 100, style.cornerRadius, style.padding, style.lineGap, style.presentation.desktopWidth, style.presentation.islandWidth, island.compactWidth, island.compactHeight, island.expandedMaxHeight, island.topOffset]
+        var numbers = [style.primarySize, style.secondarySize, style.opacity * 100, style.cornerRadius, style.padding, style.lineGap, style.presentation.desktopWidth, style.presentation.islandWidth, island.compactWidth, island.compactHeight, island.expandedMaxHeight, island.topOffset, island.compactLyricWidth]
+        if let screen = NSScreen.screens.first {
+            var geometry = IslandGeometry(screen: screen); geometry.topOffset = island.topOffset
+            let heightFloor = geometry.hasNotch ? max(18, geometry.topInset - geometry.topOffset) : 18
+            let widthCeiling = min(1000, screen.frame.width - 24)
+            let compact = geometry.frame(expanded: false, width: 0, height: 1, compactWidth: island.compactWidth, compactHeight: island.compactHeight)
+            let containerFloor = min(widthCeiling, geometry.hasNotch ? max(180, geometry.notchWidth + 168) : 180)
+            let lyricCeiling = max(100, geometry.compactContentBounds(windowFrame: compact, lyricWidth: 360).width)
+            let widthFloor = min(widthCeiling, max(320, geometry.frame(expanded: true, width: 0, height: 1, compactWidth: island.compactWidth).width))
+            sliders[8]?.minValue = containerFloor; sliders[8]?.maxValue = widthCeiling
+            sliders[12]?.maxValue = lyricCeiling
+            sliders[9]?.minValue = heightFloor
+            sliders[7]?.minValue = widthFloor; sliders[7]?.maxValue = widthCeiling
+            numbers[9] = max(heightFloor, island.compactHeight)
+            numbers[8] = compact.width; numbers[12] = min(lyricCeiling, island.compactLyricWidth)
+            numbers[7] = min(widthCeiling, max(widthFloor, style.presentation.islandWidth))
+            (values[9]?.formatter as? NumberFormatter)?.minimum = NSNumber(value: Double(heightFloor))
+            (values[7]?.formatter as? NumberFormatter)?.minimum = NSNumber(value: Double(widthFloor))
+            (values[8]?.formatter as? NumberFormatter)?.minimum = NSNumber(value: Double(containerFloor))
+            (values[12]?.formatter as? NumberFormatter)?.maximum = NSNumber(value: Double(lyricCeiling))
+        }
         for (tag, number) in numbers.enumerated() { sliders[tag]?.doubleValue = number; values[tag]?.doubleValue = number }
         sliders[5]?.isEnabled = style.presentation.showNextLine; values[5]?.isEnabled = style.presentation.showNextLine
         sliders[6]?.isEnabled = style.presentation.mode.showsDesktop; values[6]?.isEnabled = style.presentation.mode.showsDesktop
         sliders[7]?.isEnabled = style.presentation.mode.showsIsland; values[7]?.isEnabled = style.presentation.mode.showsIsland
-        for tag in 8...11 { sliders[tag]?.isEnabled = style.presentation.mode.showsIsland; values[tag]?.isEnabled = style.presentation.mode.showsIsland }
+        for tag in [8, 9, 10, 11, 12] { sliders[tag]?.isEnabled = style.presentation.mode.showsIsland; values[tag]?.isEnabled = style.presentation.mode.showsIsland }
         for (tag, hex) in [style.primaryColor, style.secondaryColor, style.backgroundColor].enumerated() {
             wells[tag]?.color = NSColor(hex: hex) ?? .white; hexFields[tag]?.stringValue = "#" + hex
         }
@@ -579,15 +632,13 @@ final class AppearanceSettings: NSObject, NSWindowDelegate, NSTextFieldDelegate 
         case 5: style.lineGap = number
         case 6: style.presentation.desktopWidth = number
         case 7:
-            style.presentation.islandWidth = max(number, style.presentation.islandAppearance.compactWidth)
+            style.presentation.islandWidth = number
             syncControls()
-        case 8:
-            style.presentation.islandAppearance.compactWidth = number
-            style.presentation.islandWidth = max(style.presentation.islandWidth, number)
-            syncControls()
+        case 8: style.presentation.islandAppearance.compactWidth = number; syncControls()
         case 9: style.presentation.islandAppearance.compactHeight = number
         case 10: style.presentation.islandAppearance.expandedMaxHeight = number
-        case 11: style.presentation.islandAppearance.topOffset = number
+        case 11: style.presentation.islandAppearance.topOffset = number; syncControls()
+        case 12: style.presentation.islandAppearance.compactLyricWidth = number; syncControls()
         default: return
         }
         apply()
@@ -627,8 +678,6 @@ final class AppearanceSettings: NSObject, NSWindowDelegate, NSTextFieldDelegate 
         apply()
     }
     @objc private func presentationChanged(_ sender: NSControl) {
-        guard LyricsDisplayMode.allCases.indices.contains(displayMode.indexOfSelectedItem) else { return }
-        style.presentation.mode = LyricsDisplayMode.allCases[displayMode.indexOfSelectedItem]
         style.presentation.showNextLine = showNextLine.state == .on
         style.presentation.showControls = showPlaybackControls.state == .on
         style.presentation.islandPinned = islandPinned.state == .on
@@ -636,6 +685,11 @@ final class AppearanceSettings: NSObject, NSWindowDelegate, NSTextFieldDelegate 
         if IslandShape.allCases.indices.contains(islandShape.indexOfSelectedItem) {
             style.presentation.islandAppearance.shape = IslandShape.allCases[islandShape.indexOfSelectedItem]
         }
+        syncControls(); apply()
+    }
+    @objc private func displayVisibilityChanged(_ sender: NSSwitch) {
+        if sender === desktopEnabled { style.presentation.desktopEnabled = sender.state == .on }
+        else if sender === islandEnabled { style.presentation.islandEnabled = sender.state == .on }
         syncControls(); apply()
     }
     @objc private func languageChanged(_ sender: NSSegmentedControl) {

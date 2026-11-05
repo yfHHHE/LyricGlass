@@ -5,26 +5,56 @@ struct IslandGeometry {
     var screenFrame: NSRect
     var topInset: CGFloat
     var notchWidth: CGFloat
+    var notchCenterX: CGFloat
     var topOffset: CGFloat = 0
 
-    init(screenFrame: NSRect, topInset: CGFloat = 0, notchWidth: CGFloat = 0) {
+    init(screenFrame: NSRect, topInset: CGFloat = 0, notchWidth: CGFloat = 0, notchCenterX: CGFloat? = nil) {
         self.screenFrame = screenFrame; self.topInset = topInset; self.notchWidth = notchWidth
+        self.notchCenterX = notchCenterX ?? screenFrame.midX
     }
     init(screen: NSScreen) {
         screenFrame = screen.frame
         topInset = screen.safeAreaInsets.top
+        notchCenterX = screen.frame.midX
         if topInset > 0, let left = screen.auxiliaryTopLeftArea, let right = screen.auxiliaryTopRightArea {
             notchWidth = max(0, right.minX - left.maxX)
+            notchCenterX = (left.maxX + right.minX) / 2
         } else { notchWidth = 0 }
     }
     var hasNotch: Bool { topInset > topOffset }
+    var notchFrame: NSRect {
+        NSRect(x: notchCenterX - notchWidth / 2, y: screenFrame.maxY - topInset, width: notchWidth, height: topInset)
+    }
+    /// Keep lyrics on the left and reserve a separate play/pause wing on the right.
+    func compactContentBounds(windowFrame: NSRect, lyricWidth: CGFloat = 160) -> NSRect {
+        let safeRight = hasNotch ? min(windowFrame.width - 44, notchFrame.minX - windowFrame.minX) : windowFrame.width - 44
+        return NSRect(x: 12, y: 0, width: max(0, min(lyricWidth, safeRight - 24)), height: windowFrame.height)
+    }
+    func compactControlBounds(windowFrame: NSRect) -> NSRect {
+        let x = max(0, windowFrame.width - 44)
+        return NSRect(x: x, y: 0, width: max(0, windowFrame.width - x), height: windowFrame.height)
+    }
     var contentTopInset: CGFloat { hasNotch ? topInset - topOffset + 8 : 8 }
     func frame(expanded: Bool, width: CGFloat, height: CGFloat, compactWidth: CGFloat = 420, compactHeight: CGFloat = 24) -> NSRect {
-        let desiredWidth = max(expanded ? max(width, compactWidth) : compactWidth, hasNotch ? notchWidth + 100 : 0)
-        let actualWidth = min(desiredWidth, max(1, screenFrame.width - 24))
-        let actualHeight = min(expanded ? height : max(compactHeight, hasNotch ? topInset - topOffset + 4 : 0), max(1, screenFrame.height - topOffset - 12))
-        return NSRect(x: screenFrame.midX - actualWidth / 2, y: screenFrame.maxY - topOffset - actualHeight,
-                      width: actualWidth, height: actualHeight)
+        let actualHeight = min(expanded ? height : max(compactHeight, hasNotch ? topInset - topOffset : 0), max(1, screenFrame.height - topOffset - 12))
+        let y = screenFrame.maxY - topOffset - actualHeight
+        if hasNotch {
+            let maximum = max(1, screenFrame.width - 24)
+            let compactSpan = min(max(compactWidth, notchWidth + 168), maximum)
+            // Keep every allowed capsule width inside the widest centered reading card.
+            let readingWidth = min(1000, maximum)
+            let readingLeft = min(screenFrame.maxX - 12 - readingWidth, max(screenFrame.minX + 12, notchCenterX - readingWidth / 2))
+            let compactLeft = min(readingLeft + readingWidth - compactSpan, max(readingLeft, notchFrame.maxX + 44 - compactSpan))
+            let compactRight = compactLeft + compactSpan
+            if !expanded { return NSRect(x: compactLeft, y: y, width: compactSpan, height: actualHeight) }
+            let minimumWidth = 2 * max(notchCenterX - compactLeft, compactRight - notchCenterX)
+            let actualWidth = min(max(width, minimumWidth), max(1, screenFrame.width - 24))
+            // Grow equally around the camera, including every point of the compact bar.
+            let x = min(screenFrame.maxX - 12 - actualWidth, max(screenFrame.minX + 12, notchCenterX - actualWidth / 2))
+            return NSRect(x: x, y: y, width: actualWidth, height: actualHeight)
+        }
+        let actualWidth = min(expanded ? max(width, compactWidth) : compactWidth, max(1, screenFrame.width - 24))
+        return NSRect(x: screenFrame.midX - actualWidth / 2, y: y, width: actualWidth, height: actualHeight)
     }
 }
 
@@ -39,7 +69,7 @@ final class IslandPanel: NSPanel {
         didSet { islandView.onSettings = onSettings }
     }
     var onPlaybackAction: ((SettingsAction) -> Void)? {
-        didSet { islandView.controls.onAction = onPlaybackAction }
+        didSet { islandView.controls.onAction = onPlaybackAction; islandView.onPlaybackAction = onPlaybackAction }
     }
 
     init() {
@@ -117,6 +147,7 @@ final class IslandPanel: NSPanel {
         resizeToFitContent()
     }
     private func resizeToFitContent() {
+        hasShadow = expanded || !islandView.geometry.hasNotch
         let target = targetFrame
         if target != frame { setFrame(target, display: true) }
     }
@@ -133,6 +164,7 @@ final class IslandPanel: NSPanel {
         guard expanded != value else { return }
         expanded = value
         islandView.expanded = value
+        hasShadow = expanded || !islandView.geometry.hasNotch
         let frame = targetFrame
         if animated && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
             NSAnimationContext.runAnimationGroup { context in
@@ -149,8 +181,8 @@ final class IslandView: NSView {
     let current = LyricsTextField("")
     let next = LyricsTextField("")
     let textViewport = LyricsTextViewport()
-    let compact = NSButton()
-    private let status = NSImageView()
+    let compact = MarqueeLyricsButton()
+    let compactPlayPause = NSButton()
     let expansion = NSButton()
     let pin = NSButton()
     let lineCount = NSSegmentedControl(labels: ["2 行", "5 行"], trackingMode: .selectOne, target: nil, action: nil)
@@ -159,11 +191,11 @@ final class IslandView: NSView {
     private(set) var currentRowIndex = 0
     private let track = NSTextField(labelWithString: "LyricGlass")
     private let settings = NSButton()
-    private let railLine = NSView()
     private let progress = NSView()
     private let progressTrack = NSView()
     private var style = LyricsAppearance()
     private var tracking: NSTrackingArea?
+    private var trackedRect: NSRect?
     private var fraction: CGFloat = 0
     private var context: [String] = []
     private var contextIndex = 0
@@ -174,6 +206,7 @@ final class IslandView: NSView {
     var onPin: (() -> Void)?
     var onLineCount: ((Int) -> Void)?
     var onSettings: (() -> Void)?
+    var onPlaybackAction: ((SettingsAction) -> Void)?
     var geometry = IslandGeometry(screenFrame: NSRect(x: 0, y: 0, width: 1440, height: 900)) {
         didSet { updateCompactText(); focusCurrent = true; needsLayout = true }
     }
@@ -202,26 +235,25 @@ final class IslandView: NSView {
             button.target = self; button.action = action
             button.setAccessibilityLabel(title); button.toolTip = title
         }
-        compact.isBordered = false; compact.contentTintColor = .white
-        compact.image = NSImage(systemSymbolName: "music.note", accessibilityDescription: nil)
-        compact.imagePosition = .imageLeading; compact.alignment = .left
-        compact.cell?.lineBreakMode = .byTruncatingTail
+        compact.contentTintColor = .white
         compact.target = self; compact.action = #selector(toggleExpansion)
         compact.setAccessibilityLabel("展开歌词")
-        status.contentTintColor = .lightGray
+        compactPlayPause.isBordered = false; compactPlayPause.contentTintColor = .white
+        compactPlayPause.target = self; compactPlayPause.action = #selector(togglePlayback)
+        compactPlayPause.image = NSImage(systemSymbolName: "play.fill", accessibilityDescription: "播放")
+        compactPlayPause.setAccessibilityLabel("播放"); compactPlayPause.toolTip = "播放"
         lineCount.controlSize = .small; lineCount.segmentStyle = .rounded
         lineCount.appearance = NSAppearance(named: .darkAqua)
         lineCount.target = self; lineCount.action = #selector(selectLineCount(_:))
         lineCount.setAccessibilityLabel("展开歌词行数")
         lineCount.toolTip = "选择展开后的两行或五行布局"
         track.font = .systemFont(ofSize: 11, weight: .medium); track.textColor = .lightGray
-        track.lineBreakMode = .byTruncatingTail; track.maximumNumberOfLines = 1
+        track.lineBreakMode = .byTruncatingTail; track.maximumNumberOfLines = 1; track.alignment = .center
         for label in [current, next] + contextFields { textViewport.textDocument.addSubview(label) }
-        for view in [progressTrack, progress, railLine] { view.wantsLayer = true }
+        for view in [progressTrack, progress] { view.wantsLayer = true }
         progressTrack.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.12).cgColor
         progress.layer?.backgroundColor = NSColor(hex: "FFF2F6")!.withAlphaComponent(0.7).cgColor
-        railLine.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.09).cgColor
-        for view in [compact, status, track, textViewport, settings, expansion, pin, lineCount, controls, railLine, progressTrack, progress] { addSubview(view) }
+        for view in [compact, compactPlayPause, track, textViewport, settings, expansion, pin, lineCount, controls, progressTrack, progress] { addSubview(view) }
         rebuildRows(); updateVisibility()
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
@@ -268,7 +300,7 @@ final class IslandView: NSView {
         textViewport.resetPosition(); focusCurrent = true
     }
     private func textWidth(_ width: CGFloat, expanded: Bool) -> CGFloat {
-        max(1, width - (fiveLine && style.presentation.showControls ? 100 : 32))
+        max(1, min(fiveLine ? 520 : 560, width - 48))
     }
     func preferredHeight(width: CGFloat, expanded: Bool) -> CGFloat {
         if !expanded { return style.presentation.islandAppearance.compactHeight }
@@ -284,13 +316,12 @@ final class IslandView: NSView {
             }
         }
         let text = heights.reduce(0, +) + CGFloat(max(0, heights.count - 1)) * gap
-        let preferred = geometry.contentTopInset + 24 + 4 + text + 12
-        let minimum: CGFloat = fiveLine && style.presentation.showControls ? geometry.contentTopInset + 128 : geometry.contentTopInset + 56
+        let preferred = geometry.contentTopInset + 26 + text + 50
+        let minimum: CGFloat = geometry.contentTopInset + 90
         return max(minimum, min(preferred, style.presentation.islandAppearance.expandedMaxHeight))
     }
     var expandedHeight: CGFloat {
-        let width = geometry.frame(expanded: true, width: style.presentation.islandWidth, height: 1,
-            compactWidth: style.presentation.islandAppearance.compactWidth).width
+        let width = geometry.frame(expanded: true, width: style.presentation.islandWidth, height: 1, compactWidth: style.presentation.islandAppearance.compactWidth).width
         return preferredHeight(width: width, expanded: true)
     }
     func apply(_ value: LyricsAppearance) {
@@ -314,29 +345,34 @@ final class IslandView: NSView {
         track.toolTip = metadata
         updateCompactText()
         compact.toolTip = [title, text, error].filter { !$0.isEmpty }.joined(separator: "\n")
-        status.image = NSImage(systemSymbolName: playing ? "waveform" : "pause.fill", accessibilityDescription: playing ? "播放中" : "已暂停")
+        let actionTitle = playing ? "暂停" : "播放"
+        if compactPlayPause.toolTip != actionTitle {
+            compactPlayPause.image = NSImage(systemSymbolName: playing ? "pause.fill" : "play.fill", accessibilityDescription: actionTitle)
+            compactPlayPause.setAccessibilityLabel(actionTitle); compactPlayPause.toolTip = actionTitle
+        }
+        compactPlayPause.isEnabled = canControl
         controls.update(playing: playing, enabled: canControl)
         fraction = duration > 0 && position.isFinite ? CGFloat(min(1, max(0, position / duration))) : 0
         if changed { onPreferredHeightChange?() }
         needsLayout = true
     }
     private func updateCompactText() {
-        let text = geometry.hasNotch ? "" : "  " + current.stringValue
+        let text = current.stringValue
         let size = min(12, max(10, style.presentation.islandAppearance.compactHeight - 6))
         let value = NSAttributedString(string: text, attributes: [.font: NSFont.systemFont(ofSize: size, weight: .medium), .foregroundColor: NSColor.white])
         if !compact.attributedTitle.isEqual(to: value) { compact.attributedTitle = value }
         compact.setAccessibilityValue(current.stringValue)
     }
     private func updateVisibility() {
-        compact.isHidden = expanded; status.isHidden = expanded
+        compact.isHidden = expanded; compactPlayPause.isHidden = expanded
+        compact.animationEnabled = !expanded
         for view in [track, textViewport, settings, expansion, pin, lineCount] { view.isHidden = !expanded }
         progressTrack.alphaValue = 1
         progress.alphaValue = 1
         progressTrack.layer?.backgroundColor = NSColor.white.withAlphaComponent(expanded ? 0.12 : 0.10).cgColor
         progress.layer?.backgroundColor = expanded ? NSColor(hex: "FFF2F6")!.withAlphaComponent(0.7).cgColor : NSColor.white.cgColor
         controls.isHidden = !expanded || !style.presentation.showControls
-        controls.orientation = fiveLine ? .vertical : .horizontal
-        railLine.isHidden = !expanded || !fiveLine || !style.presentation.showControls
+        controls.orientation = .horizontal
         lineCount.selectedSegment = fiveLine ? 1 : 0
         let title = style.presentation.islandPinned ? "解除展开锁定" : "锁定展开"
         pin.image = NSImage(systemSymbolName: style.presentation.islandPinned ? "pin.fill" : "pin", accessibilityDescription: title)
@@ -346,36 +382,48 @@ final class IslandView: NSView {
     override func layout() {
         super.layout()
         guard bounds.width > 100, bounds.height > 0 else { return }
+        let wrapsNotch = !expanded && geometry.hasNotch
+        layer?.backgroundColor = wrapsNotch ? NSColor.black.cgColor : NSColor(calibratedWhite: 0.025, alpha: 1).cgColor
+        layer?.borderWidth = wrapsNotch ? 0 : 0.5
+        layer?.maskedCorners = wrapsNotch ? [.layerMinXMinYCorner, .layerMaxXMinYCorner] : [.layerMinXMinYCorner, .layerMaxXMinYCorner, .layerMinXMaxYCorner, .layerMaxXMaxYCorner]
         layer?.cornerRadius = style.presentation.islandAppearance.shape.radius(height: bounds.height, expanded: expanded)
+        let windowFrame = window?.frame ?? geometry.frame(expanded: false, width: style.presentation.islandWidth, height: bounds.height,
+            compactWidth: style.presentation.islandAppearance.compactWidth, compactHeight: style.presentation.islandAppearance.compactHeight)
+        let compactBounds = geometry.compactContentBounds(windowFrame: windowFrame, lyricWidth: style.presentation.islandAppearance.compactLyricWidth)
         let barHeight: CGFloat = expanded ? 1.5 : 1
         let barY: CGFloat = expanded ? 3 : (bounds.height < 22 ? 1 : 2)
         let barWidth = max(0, bounds.width - 32)
         progressTrack.frame = NSRect(x: 16, y: barY, width: barWidth, height: barHeight)
         progress.frame = NSRect(x: 16, y: barY, width: barWidth * fraction, height: barHeight)
-        for view in [progressTrack, progress] { view.layer?.cornerRadius = barHeight / 2 }
+        let cutout = geometry.notchFrame.offsetBy(dx: -windowFrame.minX, dy: -windowFrame.minY)
+        for view in [progressTrack, progress] {
+            view.layer?.cornerRadius = barHeight / 2
+            let overlap = view.frame.intersection(cutout)
+            if !expanded && geometry.hasNotch && !overlap.isEmpty {
+                let path = CGMutablePath(); path.addRect(view.bounds)
+                path.addRect(overlap.offsetBy(dx: -view.frame.minX, dy: -view.frame.minY))
+                let mask = CAShapeLayer(); mask.path = path; mask.fillRule = .evenOdd
+                view.layer?.mask = mask
+            } else { view.layer?.mask = nil }
+        }
         if !expanded {
-            compact.frame = NSRect(x: 10, y: 2, width: max(0, bounds.width - 44), height: max(0, bounds.height - 4))
-            let size = min(14, bounds.height - 6)
-            status.frame = NSRect(x: bounds.width - 28, y: (bounds.height - size) / 2, width: size, height: size)
+            compact.frame = NSRect(x: compactBounds.minX, y: 3, width: compactBounds.width, height: max(0, bounds.height - 6))
+            let control = geometry.compactControlBounds(windowFrame: windowFrame)
+            let size = min(32, bounds.height - 4)
+            compactPlayPause.frame = NSRect(x: control.midX - size / 2, y: (bounds.height - size) / 2, width: size, height: size)
+            updateTrackingAreas()
             return
         }
         let top = bounds.height - geometry.contentTopInset
         let textWidth = textWidth(bounds.width, expanded: expanded)
-        settings.frame = NSRect(x: bounds.width - 42, y: top - 23, width: 24, height: 24)
-        expansion.frame = NSRect(x: bounds.width - 70, y: top - 23, width: 24, height: 24)
-        pin.frame = NSRect(x: bounds.width - 98, y: top - 23, width: 24, height: 24)
-        lineCount.frame = NSRect(x: bounds.width - 182, y: top - 21, width: 78, height: 20)
-        let toolbarWidth: CGFloat = !fiveLine && style.presentation.showControls ? 118 : 0
-        track.frame = NSRect(x: 16, y: top - 18, width: max(1, bounds.width - 204 - toolbarWidth), height: 16)
-        if fiveLine && style.presentation.showControls {
-            railLine.frame = NSRect(x: bounds.width - 65, y: 12, width: 1, height: max(0, top - 12))
-            let available = max(0, top - 28 - 12)
-            controls.frame = NSRect(x: bounds.width - 45, y: 12 + max(0, (available - 96) / 2), width: 28, height: min(96, available))
-        } else {
-            controls.frame = NSRect(x: bounds.width - 302, y: top - 23, width: 112, height: 24)
-        }
+        settings.frame = NSRect(x: bounds.width - 42, y: 13, width: 24, height: 24)
+        expansion.frame = NSRect(x: bounds.width - 70, y: 13, width: 24, height: 24)
+        pin.frame = NSRect(x: bounds.width - 98, y: 13, width: 24, height: 24)
+        lineCount.frame = NSRect(x: 16, y: 15, width: 78, height: 20)
+        track.frame = NSRect(x: 24, y: top - 18, width: max(1, bounds.width - 48), height: 16)
+        controls.frame = NSRect(x: (bounds.width - 112) / 2, y: 12, width: 112, height: 26)
         let widthChanged = textViewport.frame.width != textWidth
-        textViewport.frame = NSRect(x: 16, y: 12, width: textWidth, height: max(0, top - 28 - 12))
+        textViewport.frame = NSRect(x: (bounds.width - textWidth) / 2, y: 50, width: textWidth, height: max(0, top - 26 - 50))
         let heights = visibleRows.map { $0.height(fittingWidth: textWidth) }
         let total = heights.reduce(0, +) + CGFloat(max(0, heights.count - 1)) * gap
         textViewport.fitDocument(height: total)
@@ -392,17 +440,21 @@ final class IslandView: NSView {
             textViewport.reflectScrolledClipView(textViewport.contentView)
             focusCurrent = false
         }
+        updateTrackingAreas()
     }
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
+        let rect = expanded ? bounds : compact.frame
+        guard trackedRect != rect else { return }
         if let tracking { removeTrackingArea(tracking) }
-        let area = NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self)
-        addTrackingArea(area); tracking = area
+        let area = NSTrackingArea(rect: rect, options: [.mouseEnteredAndExited, .activeAlways], owner: self)
+        addTrackingArea(area); tracking = area; trackedRect = rect
     }
     override func mouseEntered(with event: NSEvent) { onHover?(true) }
     override func mouseExited(with event: NSEvent) { onHover?(false) }
     override func mouseDown(with event: NSEvent) { if !expanded { onExpand?() } }
     @objc private func toggleExpansion() { onExpand?() }
+    @objc private func togglePlayback() { onPlaybackAction?(.togglePlayback) }
     @objc private func togglePin() { onPin?() }
     @objc private func selectLineCount(_ sender: NSSegmentedControl) { onLineCount?(sender.selectedSegment == 1 ? 5 : 2) }
     @objc private func openSettings() { onSettings?() }

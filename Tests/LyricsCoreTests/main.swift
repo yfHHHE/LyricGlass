@@ -94,7 +94,7 @@ final class TimelineTests {
         let song = Song(id: "collab", title: "Afterglow (feat. Guest)", artist: "Lead, Guest", album: "Shared Album", duration: 200)
         checkTrue(LyricsProvider.matches(.init(trackName: "Afterglow", artistName: "Guest & Lead", albumName: "Shared Album", duration: 200), song: song))
         checkTrue(LyricsProvider.matches(.init(trackName: "Afterglow", artistName: "Lead", albumName: "Shared Album", duration: 201), song: song))
-        checkFalse(LyricsProvider.matches(.init(trackName: "Afterglow", artistName: "Lead", albumName: "Another Album", duration: 200), song: song))
+        checkTrue(LyricsProvider.matches(.init(trackName: "Afterglow", artistName: "Lead", albumName: "Another Album", duration: 200), song: song))
         checkFalse(LyricsProvider.matches(.init(trackName: "Afterglow", artistName: "Lead & Stranger", albumName: "Shared Album", duration: 200), song: song))
         checkFalse(LyricsProvider.matches(.init(trackName: "Afterglow", artistName: "LeadGuest", albumName: "Shared Album", duration: 200), song: song))
         checkFalse(LyricsProvider.matches(.init(trackName: "Afterglow (Live)", artistName: "Lead, Guest", albumName: "Shared Album", duration: 200), song: song))
@@ -110,11 +110,11 @@ final class TimelineTests {
         checkTrue(LyricsRecord(trackName: "Example", artistName: "Artist", duration: 100, syncedLyrics: "[00:05]one\n[00:10]two").hasSyncedLyrics)
     }
 
-    func testBilingualDisplayNamesNeedAlbumEvidence() {
+    func testBilingualDisplayNamesKeepArtistEvidence() {
         let song = Song(id: "bilingual", title: "Example", artist: "海風 Sea Breeze", album: "Room", duration: 200)
         checkTrue(LyricsProvider.matches(.init(trackName: "Example", artistName: "海风", albumName: "Room", duration: 200), song: song))
         checkTrue(LyricsProvider.matches(.init(trackName: "Example", artistName: "Sea Breeze", albumName: "Room", duration: 200), song: song))
-        checkFalse(LyricsProvider.matches(.init(trackName: "Example", artistName: "海风", albumName: "Elsewhere", duration: 200), song: song))
+        checkTrue(LyricsProvider.matches(.init(trackName: "Example", artistName: "海风", albumName: "Elsewhere", duration: 200), song: song))
         checkFalse(LyricsProvider.matches(.init(trackName: "Example", artistName: "Breeze", albumName: "Room", duration: 200), song: song))
     }
 
@@ -147,6 +147,7 @@ func checkFalse(_ value: Bool, line: UInt = #line) { checkTrue(!value, line: lin
 
 let suite = TimelineTests()
 let cases: [(String, () -> Void)] = [
+    ("Release labels and album differences reuse timed lyrics across players", checkReleaseMetadataAndCrossPlayerCache),
     ("Five-line context follows playback, seeks, offsets and song boundaries", checkReadingContextFollowsTimeline),
     ("Localized artist aliases retain version, guest and duration guards", checkLocalizedArtistIdentitiesKeepRecordingGuards),
     ("LRC timestamps and repeated tags", suite.testTimestampsFractionsRepeatedTagsAndMetadata),
@@ -159,7 +160,7 @@ let cases: [(String, () -> Void)] = [
     ("Amazing Show alias preserves recording checks", suite.testAmazingShowAliasKeepsRecordingChecks),
     ("Collaborators match without mixing recording versions", suite.testCollaboratorsAndVersionsStayDistinct),
     ("Provider aliases and usable timestamps", suite.testCatalogAliasesAndRealTimestamps),
-    ("Bilingual display names require album evidence", suite.testBilingualDisplayNamesNeedAlbumEvidence),
+    ("Bilingual artist identities tolerate release-album differences", suite.testBilingualDisplayNamesKeepArtistEvidence),
     ("Cache expiry and recording identity", suite.testCacheExpiryAndRecordingIdentity),
     ("Apple Music seconds, pause and seek reach the lyric timeline", checkAppleMusicReadAndSeek),
     ("Apple Music streams use notifications without stale tracks", checkAppleMusicStreamingNotifications),
@@ -183,6 +184,8 @@ for (name, run) in cases {
     print("\(failures == before ? "PASS" : "FAIL") \(name)")
 }
 let asyncCases: [(String, () async -> Void)] = [
+    ("LRCLIB exact plain result continues through timed search variants", checkLRCLIBPlainDoesNotStopSearch),
+    ("Catalogs try broader queries and later candidates after plain lyrics", checkCatalogsContinueAfterPlainCandidates),
     ("Localized search names fetch timed lyrics and reuse recording cache", checkLocalizedQueriesReachTimedLyrics),
     ("lrcmux preserves milliseconds, attribution and offline cache", checkLrcmuxTimelineAttributionAndOfflineCache),
     ("lrcmux rejects covers, versions, duration mismatches and invalid timing", checkLrcmuxRejectsWrongRecordingsAndUntimedText),

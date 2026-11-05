@@ -63,22 +63,22 @@ func verifyCompactLayouts() throws {
     settings.showWindow(); settings.window.orderOut(nil)
     let views = descendants(settings.root)
     let sliders = views.compactMap { $0 as? NSSlider }
-    for (tag, value) in [(8, 640.0), (9, 20.0), (10, 180.0), (11, 24.0)] {
+    for (tag, value) in [(8, 640.0), (12, 240.0), (11, 24.0), (9, 20.0), (10, 180.0)] {
         let slider = sliders.first { $0.tag == tag }!; slider.doubleValue = value; try send(slider)
     }
-    let shape = views.compactMap { $0 as? NSPopUpButton }.first { $0.accessibilityLabel() == "顶部窗口形状" }!
+    let shape = views.compactMap { $0 as? NSPopUpButton }.first { $0.accessibilityLabel() == "胶囊形状" }!
     shape.selectItem(at: 2); try send(shape)
     let saved = store.load().presentation.islandAppearance
-    try require(saved.compactWidth == 640 && saved.compactHeight == 20 && saved.expandedMaxHeight == 180 && saved.topOffset == 24 && saved.shape == .rectangle, "Every new native control must save its own value")
-    try require(store.load().presentation.islandWidth >= saved.compactWidth, "Expanded island must not shrink away from a pointer on the wider compact window")
+    try require(saved.compactWidth == 640 && saved.compactLyricWidth == 240 && saved.compactHeight == 20 && saved.expandedMaxHeight == 180 && saved.topOffset == 24 && saved.shape == .rectangle, "Container and lyric widths must both save independently with the other controls")
+    let folded = island.frame
     island.islandView.layoutSubtreeIfNeeded()
-    try require(island.islandView.layer?.cornerRadius == 10, "The collapsed window must remain a capsule regardless of expanded shape")
+    try require(island.islandView.layer?.cornerRadius == 0, "The selected rectangle shape must control the collapsed window")
     island.setExpanded(true, animated: false); island.islandView.layoutSubtreeIfNeeded()
-    try require(island.islandView.layer?.cornerRadius == 0, "The selected rectangle shape must apply when expanded")
+    try require(island.islandView.layer?.cornerRadius == 18 && island.frame.contains(folded), "Expansion must keep its rounded reading card and contain the original hover area")
     let screen = IslandGeometry(screenFrame: NSRect(x: -1000, y: 100, width: 1000, height: 700))
     var shifted = screen; shifted.topOffset = 24
     let compact = shifted.frame(expanded: false, width: 480, height: 300, compactWidth: 640, compactHeight: 20)
-    try require(compact.size == NSSize(width: 640, height: 20) && compact.maxY == 776, "Collapsed size and vertical position must follow their controls")
+    try require(compact.size == NSSize(width: 640, height: 20) && compact.maxY == 776, "Collapsed size must follow the container width independently of the lyric viewport")
     var changed = store.load(); changed.presentation.islandPinned = true; island.apply(changed)
     island.islandView.show(current: String(repeating: "让每一个字都被看见 ", count: 50), next: "下一句", title: "Test", artist: "Test", playing: false, canControl: true, position: 0, duration: 100, error: "")
     try require(island.frame.height <= 180, "Expanded height must respect the configured maximum while preserving scrollable lyrics")
@@ -110,7 +110,7 @@ func exportCompactPreviews(to directory: URL) throws {
     panel.lyricsView.show(current: "让旋律停在窗边", next: "让文字跟着时间", detail: "")
     try save(panel.lyricsView, "desktop-zero-gap")
     let island = IslandPanel()
-    style.presentation.islandAppearance.compactWidth = 540
+    style.presentation.islandAppearance.compactLyricWidth = 300
     style.presentation.islandAppearance.compactHeight = 22
     for shape in IslandShape.allCases {
         style.presentation.islandAppearance.shape = shape; island.apply(style)

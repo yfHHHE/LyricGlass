@@ -13,12 +13,13 @@ func checkLocalizedArtistIdentitiesKeepRecordingGuards() {
         let song = Song(id: "localized", title: title, artist: expected, album: album, duration: duration)
         checkTrue(LyricsProvider.matches(LyricsRecord(trackName: title, artistName: actual, albumName: album, duration: duration), song: song))
         checkFalse(LyricsProvider.matches(LyricsRecord(trackName: title + " (Live)", artistName: actual, albumName: album, duration: duration), song: song))
-        checkFalse(LyricsProvider.matches(LyricsRecord(trackName: title, artistName: actual, albumName: album, duration: duration + 3), song: song))
+        checkTrue(LyricsProvider.matches(LyricsRecord(trackName: title, artistName: actual, albumName: album, duration: duration + 3), song: song))
+        checkFalse(LyricsProvider.matches(LyricsRecord(trackName: title, artistName: actual, albumName: album, duration: duration + 9), song: song))
         checkFalse(LyricsProvider.matches(LyricsRecord(trackName: title, artistName: "Other Artist", albumName: album, duration: duration), song: song))
     }
     let duet = Song(id: "duet", title: "night night", artist: "Andr & Whys Young", album: "SKIN", duration: 239)
     checkFalse(LyricsProvider.matches(.init(trackName: duet.title, artistName: "Andr & Other Guest", albumName: duet.album, duration: duet.duration), song: duet))
-    checkFalse(LyricsProvider.matches(.init(trackName: duet.title, artistName: "Andr", albumName: "Different Album", duration: duet.duration), song: duet))
+    checkTrue(LyricsProvider.matches(.init(trackName: duet.title, artistName: "Andr", albumName: "Different Album", duration: duet.duration), song: duet))
 }
 
 actor LocalizedSearchFixture {

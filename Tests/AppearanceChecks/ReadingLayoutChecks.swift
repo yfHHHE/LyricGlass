@@ -17,25 +17,26 @@ func verifyReadingLayouts() throws {
     let view = panel.islandView
     show(lines, active: 1)
     try require(!panel.expanded && !view.compact.isHidden && view.textViewport.isHidden && view.controls.isHidden, "Default must be the original single-line capsule, with expanded lyrics and controls hidden")
-    try require(panel.frame.height == 24 && view.layer?.cornerRadius == 12, "Default capsule must remain small and fully rounded")
+    let expectedHeight = max(24, view.geometry.hasNotch ? view.geometry.topInset - view.geometry.topOffset : 0)
+    try require(panel.frame.height == expectedHeight && view.layer?.cornerRadius == expectedHeight / 2, "Default capsule must remain compact, including the camera's minimum height on a notched screen")
     try require(view.compact.attributedTitle.string.contains(lines[1]), "The original capsule must preview the current lyric")
     let compact = panel.frame
     panel.setExpanded(true, animated: false); view.layoutSubtreeIfNeeded()
     try require(view.visibleRows.map(\.stringValue) == Array(lines[1...2]) && view.current.alignment == .center, "Default expanded A must show the centered current and next lyrics")
-    try require(view.controls.orientation == .horizontal && view.textViewport.frame.maxY < view.controls.frame.minY, "Two-line playback controls must share the title row above the lyrics")
+    try require(view.controls.orientation == .horizontal && view.textViewport.frame.minY > view.controls.frame.maxY, "Playback controls must remain in a separate footer below the lyrics")
     view.lineCount.selectedSegment = 1; try send(view.lineCount); view.layoutSubtreeIfNeeded()
     try require(store.load().presentation.islandAppearance.expandedLineCount == 5, "The inline five-line option must save independently of the lock")
     try require(view.visibleRows.map(\.stringValue) == lines && view.currentRowIndex == 1, "Expanded D must display five correctly ordered context rows")
-    try require(view.visibleRows.allSatisfy { $0.alignment == .left } && view.controls.orientation == .vertical, "Expanded lyrics must align left beside vertical playback controls")
+    try require(view.visibleRows.allSatisfy { $0.alignment == .left } && view.controls.orientation == .horizontal, "Five-line lyrics must keep their reading alignment with horizontal playback controls below")
     let accessible = view.textViewport.textDocument.accessibilityChildren() as? [LyricsTextField]
     try require(accessible?.map(\.stringValue) == lines && view.current.accessibilityLabel() == "当前歌词", "VoiceOver must read the five rows in visual order and identify the active lyric")
-    try require(view.textViewport.frame.maxX < view.controls.frame.minX, "The right-side buttons must not cover the lyrics")
-    try require(view.controls.previous.frame.minY > view.controls.playPause.frame.minY && view.controls.playPause.frame.minY > view.controls.next.frame.minY, "Vertical controls must keep previous, play, next ordering")
+    try require(view.textViewport.frame.minY > view.controls.frame.maxY && view.textViewport.frame.midX == view.bounds.midX && view.controls.frame.midX == view.bounds.midX, "Reading column and footer controls must be centered without overlapping")
+    try require(view.controls.previous.frame.minX < view.controls.playPause.frame.minX && view.controls.playPause.frame.minX < view.controls.next.frame.minX, "Footer controls must keep previous, play, next ordering")
     try require(panel.frame.height > compact.height && panel.frame.maxY == compact.maxY, "Five-line expansion must grow down from the same screen anchor")
     var actions: [SettingsAction] = []
     panel.onPlaybackAction = { actions.append($0) }
     for button in [view.controls.previous, view.controls.playPause, view.controls.next] { try send(button) }
-    try require(actions == [.previousTrack, .togglePlayback, .nextTrack], "All three vertical buttons must reach the actual player action route")
+    try require(actions == [.previousTrack, .togglePlayback, .nextTrack], "All three footer buttons must reach the actual player action route")
     show(lines, active: 4)
     try require(view.current === view.visibleRows.last && view.currentRowIndex == 4, "At the last lyric, preceding context must remain visible without duplicating the current line")
     let long = String(repeating: "Every time 我告訴我自己 ", count: 120)

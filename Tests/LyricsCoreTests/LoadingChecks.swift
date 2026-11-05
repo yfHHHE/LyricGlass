@@ -82,7 +82,7 @@ func checkRecordingCacheReuseAndIsolation() async {
         checkTrue(cache.load(song: music)?.cached ?? false)
         checkNil(cache.load(song: Song(id: song.id, title: song.title + " (Live)", artist: song.artist, album: song.album, duration: song.duration)))
         checkNil(cache.load(song: Song(id: song.id, title: song.title, artist: "Other Artist", album: song.album, duration: song.duration)))
-        checkNil(cache.load(song: Song(id: song.id, title: song.title, artist: song.artist, album: "Other Album", duration: song.duration)))
+        checkTrue(cache.load(song: Song(id: song.id, title: song.title, artist: song.artist, album: "Other Album", duration: song.duration))?.cached ?? false)
         checkNil(cache.load(song: Song(id: song.id, title: song.title, artist: song.artist, album: song.album, duration: 200)))
         let offline = LyricsHTTPClient(sender: { _ in throw URLError(.notConnectedToInternet) })
         let result = try await LyricsProvider(http: offline, cacheDirectory: directory).fetch(song: music)

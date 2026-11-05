@@ -73,7 +73,7 @@ func verifyWrapping() throws {
     try require(island.frame.height > initialHeight && island.frame.maxY == top, "New long lyrics must grow an expanded island downwards from its top anchor")
     try requireCompleteGlyphLayout(island.islandView.current)
     try requireCompleteGlyphLayout(island.islandView.next)
-    try require(island.islandView.textViewport.frame.maxX < island.islandView.controls.frame.minX, "Wrapped text must not cover the right-side transport controls")
+    try require(island.islandView.textViewport.frame.minY > island.islandView.controls.frame.maxY, "Wrapped text must not cover the footer transport controls")
     let notched = IslandGeometry(screenFrame: NSRect(x: -900, y: 100, width: 900, height: 700), topInset: 32, notchWidth: 200)
     island.islandView.geometry = notched
     island.setFrame(notched.frame(expanded: true, width: 320, height: island.islandView.expandedHeight), display: true)

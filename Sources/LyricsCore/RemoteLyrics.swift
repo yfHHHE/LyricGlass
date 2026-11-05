@@ -5,11 +5,15 @@ struct RemoteLyrics {
     let http: LyricsHTTPClient
 
     func lrclib(_ song: Song) async throws -> [LyricsRecord] {
+        var fallback: [LyricsRecord] = []
         var query = ["track_name": song.title, "artist_name": song.artist, "album_name": song.album]
         if song.duration <= 3600 { query["duration"] = String(Int(song.duration.rounded())) }
         do {
             let record: LyricsRecord = try await json("https://lrclib.net/api/get", query)
-            if LyricsProvider.matches(record, song: song) { return [record] }
+            if LyricsProvider.matches(record, song: song) {
+                if record.hasSyncedLyrics { return [record] }
+                fallback.append(record)
+            }
         } catch LyricsLookupError.http(404) { }
         let title = Self.simplified(SongMatcher.queryTitle(song.title))
         let queries = [
@@ -21,11 +25,19 @@ struct RemoteLyrics {
         for query in queries {
             let key = query.sorted { $0.key < $1.key }.map { $0.key + "=" + $0.value }.joined(separator: "&")
             guard seen.insert(key).inserted else { continue }
-            let records: [LyricsRecord] = try await json("https://lrclib.net/api/search", query)
-            let valid = records.filter { LyricsProvider.matches($0, song: song) }
-            if !valid.isEmpty { return valid }
+            do {
+                let records: [LyricsRecord] = try await json("https://lrclib.net/api/search", query)
+                let valid = records.filter { LyricsProvider.matches($0, song: song) }
+                if valid.contains(where: \.hasSyncedLyrics) { return valid }
+                fallback.append(contentsOf: valid)
+            } catch {
+                try Task.checkCancellation()
+                if error is CancellationError || (error as? URLError)?.code == .cancelled { throw error }
+                if fallback.isEmpty { throw error }
+                return fallback
+            }
         }
-        return []
+        return fallback
     }
 
     func prepareNetEase() async throws {
@@ -63,6 +75,8 @@ struct RemoteLyrics {
     }
 
     func netease(_ song: Song) async throws -> [LyricsRecord] {
+        var results: [LyricsRecord] = []
+        var visited: Set<Int64> = []
         let title = Self.simplified(SongMatcher.queryTitle(song.title))
         let queries = [title + " " + ArtistNames.queryName(song.artist), title]
         for query in queries {
@@ -75,9 +89,9 @@ struct RemoteLyrics {
                     artistAliases: track.artists.flatMap { ($0.alias ?? []) + ($0.transNames ?? []) + ($0.tns ?? []) })
                 return LyricsProvider.matches(record, song: song) ? (track, record) : nil
             }.sorted { (SongMatcher.score($0.1, song: song) ?? 0) > (SongMatcher.score($1.1, song: song) ?? 0) }
-            var results: [LyricsRecord] = []
-            for (track, metadata) in candidates.prefix(2) {
+            for (track, metadata) in candidates.filter({ !visited.contains($0.0.id) }).prefix(4) {
                 try Task.checkCancellation()
+                visited.insert(track.id)
                 let lyric: NetEaseLyrics = try await json("https://music.163.com/api/song/lyric",
                     ["id": String(track.id), "lv": "1", "kv": "-1", "tv": "-1"])
                 guard lyric.code == 200 else { throw LyricsLookupError.unavailable("网易") }
@@ -86,12 +100,13 @@ struct RemoteLyrics {
                 results.append(record)
                 if record.hasSyncedLyrics { return results }
             }
-            if !results.isEmpty { return results }
         }
-        return []
+        return results
     }
 
     func qq(_ song: Song) async throws -> [LyricsRecord] {
+        var results: [LyricsRecord] = []
+        var visited: Set<String> = []
         let title = Self.simplified(SongMatcher.queryTitle(song.title))
         let queries = [title + " " + ArtistNames.queryName(song.artist), title]
         for query in queries {
@@ -104,9 +119,9 @@ struct RemoteLyrics {
                     artistAliases: track.singer.flatMap { ($0.alias ?? []) + ($0.transNames ?? []) + ($0.tns ?? []) })
                 return LyricsProvider.matches(record, song: song) ? (track, record) : nil
             }.sorted { (SongMatcher.score($0.1, song: song) ?? 0) > (SongMatcher.score($1.1, song: song) ?? 0) }
-            var results: [LyricsRecord] = []
-            for (track, metadata) in candidates.prefix(2) {
+            for (track, metadata) in candidates.filter({ !visited.contains($0.0.songmid) }).prefix(4) {
                 try Task.checkCancellation()
+                visited.insert(track.songmid)
                 let lyric: QQLyrics = try await json("https://c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg",
                     ["songmid": track.songmid, "g_tk": "5381", "format": "json", "nobase64": "1"],
                     referer: "https://y.qq.com/portal/player.html")
@@ -117,12 +132,13 @@ struct RemoteLyrics {
                 results.append(record)
                 if record.hasSyncedLyrics { return results }
             }
-            if !results.isEmpty { return results }
         }
-        return []
+        return results
     }
 
     func kugou(_ song: Song) async throws -> [LyricsRecord] {
+        var results: [LyricsRecord] = []
+        var visited: Set<String> = []
         let title = Self.simplified(SongMatcher.queryTitle(song.title))
         for query in [title + " " + ArtistNames.queryName(song.artist), title] {
             let reply: KugouSearch = try await json("https://lyrics.kugou.com/search",
@@ -136,9 +152,9 @@ struct RemoteLyrics {
                     duration: track.duration / 1000, source: .kugou)
                 return LyricsProvider.matches(record, song: song) ? (track, record) : nil
             }.sorted { (SongMatcher.score($0.1, song: song) ?? 0) > (SongMatcher.score($1.1, song: song) ?? 0) }
-            var results: [LyricsRecord] = []
-            for (track, metadata) in candidates.prefix(2) {
+            for (track, metadata) in candidates.filter({ !visited.contains($0.0.id) }).prefix(4) {
                 try Task.checkCancellation()
+                visited.insert(track.id)
                 // The search result supplies the resource key; no account credentials are used or saved.
                 let lyric: KugouLyrics = try await json("https://lyrics.kugou.com/download",
                     [.init(name: "id", value: track.id), .init(name: "accesskey", value: track.accesskey),
@@ -151,9 +167,8 @@ struct RemoteLyrics {
                 results.append(record)
                 if record.hasSyncedLyrics { return results }
             }
-            if !results.isEmpty { return results }
         }
-        return []
+        return results
     }
 
     private func json<T: Decodable>(_ base: String, _ parameters: [String: String], post: Bool = false, referer: String? = nil) async throws -> T {

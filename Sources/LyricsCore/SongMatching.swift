@@ -55,14 +55,20 @@ public enum SongMatcher {
         // Stop at edition brackets/dashes so a trailing Live or Remix label survives.
         let features = parentheses.replacingOccurrences(of: #"(?i)\s+(?:feat\.?|ft\.?|featuring)\s+[^\(\[\-–—]+"#,
                                                         with: "", options: .regularExpression)
-        return features.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Release labels differ between Apple Music, Spotify and compilation catalogs.
+        // Keep recording-changing labels such as Live, Remix, Acoustic and Radio Edit.
+        let release = #"(?:(?:19|20)\d{2}\s+)?(?:remaster(?:ed)?(?:\s+(?:version|edition))?|album\s+version|original\s+version|stereo(?:\s+(?:mix|version))?|mono(?:\s+(?:mix|version))?)(?:\s+(?:19|20)\d{2})?"#
+        let brackets = features.replacingOccurrences(of: #"(?i)\s*[\(\[]\s*"# + release + #"\s*[\)\]]"#, with: "", options: .regularExpression)
+        return brackets.replacingOccurrences(of: #"(?i)\s+[-–—]\s*"# + release + #"\s*$"#, with: "", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     public static func titleKey(_ title: String) -> String { LyricsProvider.normalized(queryTitle(title)) }
+    public static func durationTolerance(_ duration: Double) -> Double { min(6, max(3, duration * 0.02)) }
 
     public static func score(_ record: LyricsRecord, song: Song) -> Double? {
         guard song.duration.isFinite, record.duration.isFinite, song.duration > 0, record.duration > 0,
-              abs(record.duration - song.duration) <= 2,
+              abs(record.duration - song.duration) <= durationTolerance(song.duration),
               !titleKey(song.title).isEmpty, titleKey(record.trackName) == titleKey(song.title) else { return nil }
         let album = LyricsProvider.normalized(song.album)
         let sameAlbum = !album.isEmpty && album == LyricsProvider.normalized(record.albumName ?? "")
@@ -74,11 +80,11 @@ public enum SongMatcher {
             && (record.artistAliases ?? []).map(ArtistNames.canonical).contains(expected[0])
         let expectedNames = Set(ArtistNames.displayVariants(song.artist).map(ArtistNames.canonical))
         let actualNames = Set(ArtistNames.displayVariants(record.artistName).map(ArtistNames.canonical))
-        let bilingual = expected.count == 1 && actual.count == 1 && sameAlbum
+        let bilingual = expected.count == 1 && actual.count == 1
             && !expectedNames.isDisjoint(with: actualNames)
-        // A catalog may omit guests, but must retain the lead, album and matching recording length.
-        let leadOnly = expected.count > 1 && actual.count == 1 && expected.first == actual.first && sameAlbum
+        // Either catalog may omit guests or use a compilation album; retain the lead identity.
+        let leadOnly = !expected.isEmpty && !actual.isEmpty && (expected.count == 1 || actual.count == 1) && expected.first == actual.first
         guard wholeMatch || fullMatch || providerAlias || bilingual || leadOnly else { return nil }
-        return 100 - abs(record.duration - song.duration) * 5 + (sameAlbum ? 20 : 0) + (leadOnly ? 0 : 10)
+        return 100 - abs(record.duration - song.duration) * 5 + (sameAlbum ? 20 : 0) + (fullMatch || wholeMatch ? 10 : 0)
     }
 }
