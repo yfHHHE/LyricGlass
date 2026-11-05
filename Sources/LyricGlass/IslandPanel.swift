@@ -329,7 +329,11 @@ final class IslandView: NSView {
     }
     private func updateVisibility() {
         compact.isHidden = expanded; status.isHidden = expanded
-        for view in [track, textViewport, settings, expansion, pin, lineCount, progressTrack, progress] { view.isHidden = !expanded }
+        for view in [track, textViewport, settings, expansion, pin, lineCount] { view.isHidden = !expanded }
+        progressTrack.alphaValue = 1
+        progress.alphaValue = 1
+        progressTrack.layer?.backgroundColor = NSColor.white.withAlphaComponent(expanded ? 0.12 : 0.10).cgColor
+        progress.layer?.backgroundColor = expanded ? NSColor(hex: "FFF2F6")!.withAlphaComponent(0.7).cgColor : NSColor.white.cgColor
         controls.isHidden = !expanded || !style.presentation.showControls
         controls.orientation = fiveLine ? .vertical : .horizontal
         railLine.isHidden = !expanded || !fiveLine || !style.presentation.showControls
@@ -343,6 +347,12 @@ final class IslandView: NSView {
         super.layout()
         guard bounds.width > 100, bounds.height > 0 else { return }
         layer?.cornerRadius = style.presentation.islandAppearance.shape.radius(height: bounds.height, expanded: expanded)
+        let barHeight: CGFloat = expanded ? 1.5 : 1
+        let barY: CGFloat = expanded ? 3 : (bounds.height < 22 ? 1 : 2)
+        let barWidth = max(0, bounds.width - 32)
+        progressTrack.frame = NSRect(x: 16, y: barY, width: barWidth, height: barHeight)
+        progress.frame = NSRect(x: 16, y: barY, width: barWidth * fraction, height: barHeight)
+        for view in [progressTrack, progress] { view.layer?.cornerRadius = barHeight / 2 }
         if !expanded {
             compact.frame = NSRect(x: 10, y: 2, width: max(0, bounds.width - 44), height: max(0, bounds.height - 4))
             let size = min(14, bounds.height - 6)
@@ -382,8 +392,6 @@ final class IslandView: NSView {
             textViewport.reflectScrolledClipView(textViewport.contentView)
             focusCurrent = false
         }
-        progressTrack.frame = NSRect(x: 16, y: 3, width: max(0, bounds.width - 32), height: 1.5)
-        progress.frame = NSRect(x: 16, y: 3, width: max(0, bounds.width - 32) * fraction, height: 1.5)
     }
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
